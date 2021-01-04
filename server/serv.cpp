@@ -16,6 +16,9 @@ Github: https://github.com/Tencent/rapidjson
 #include <thread>
 #include <unordered_set>
 #include <signal.h>
+#include "Queue.hpp"
+#include <map>
+#include <vector>
 
 // Abstract class used for handling different kinds of events
 class Handler {
@@ -40,6 +43,8 @@ class Server {
         int epoll_fd; // file descriptor for epoll
         ServerHandler* handler; // handler for new connections
 
+        std::map<std::string, Queue*> queues; // all queues
+
         void setReuseAddr(int sock);
     public:
         Server();
@@ -49,6 +54,16 @@ class Server {
         int getEpoll();
         int getSocket();
         std::unordered_set<Client*>* getClients();
+
+        std::vector<std::string> getAllQueues(); // returns all queues AVAILABLE FOR USER - TO DO
+
+        bool createQueue(Client* owner, bool is_private, std::string name); // TO DO
+
+        bool deleteQueue(std::string name, Client* requester); // TO DO - requester must be the owner
+
+        bool getAllMessages(Client* requester, std::string name); // TO DO
+
+        bool addMessage(Client* requester, std::string content, long validityTime); // TO DO
 
         bool authentication(int conn, std::string *name); 
         // authentication - checks whether received username and password match data in user list
@@ -71,11 +86,12 @@ class Client : public Handler {
                 username = name;
                 printf("Successful login of user %s\n", username.c_str());
             
-                *confirm = htons(200); // code to be sent to client, confirming success in logging in
+                
+                *confirm = 200; // code to be sent to client, confirming success in logging in
             }
             else{
                 printf("Failed to log in\n");
-                *confirm = htons(401); // failure code
+                *confirm = 401; // failure code
             }
         }
 
@@ -88,8 +104,6 @@ class Client : public Handler {
                 
                 // check if read is really possible
                 if(read(clientSocket, &choice, sizeof(uint16_t)) > 0) {
-                    
-                    choice = ntohs(choice); // convert read value
                     
                     uint16_t confirm; // variable for storing request status
                     
@@ -104,7 +118,7 @@ class Client : public Handler {
                         return;
                         break;
                     default: // different - wrong request or network error
-                        confirm = htons(404);
+                        confirm = 404;
                         break;
                     }
 
@@ -202,6 +216,7 @@ Server::Server() {
     sockaddr_in serverAddr{.sin_family=AF_INET, .sin_port=htons((short)port), .sin_addr={INADDR_ANY}};
     
     int res = bind(in_socket, (sockaddr*) &serverAddr, sizeof(serverAddr));
+    
     // handle errors
     if(res) error(1, errno, "bind failed");
 
@@ -252,8 +267,6 @@ bool Server::authentication(int conn, std::string *name) {
     uint16_t size = 0; // how many bates of data are to be read
     
     read(conn, &size, sizeof(uint16_t)); // read size of message to be received
-    
-    size = ntohs(size); // convert read value
 
     char buf[size]; // prepare buffer for login and password
     

@@ -79,7 +79,7 @@ bool ServerConnection::connectToServer() {
 // send request for logging in
 bool ServerConnection::logIn(const char *user, const char* pass) {
     
-    uint16_t action = htons(1); // convert request number to network byte order
+    uint16_t action = 1;//htons(1); // convert request number to network byte order
 
     // send information about kind of request you're about to make
     write(server_socket, &action, sizeof(uint16_t)); 
@@ -89,7 +89,7 @@ bool ServerConnection::logIn(const char *user, const char* pass) {
     input += ","; input += pass; input += ";";
 
     uint16_t length = input.length();
-    length = htons(length); // convert message lenght to network byte order
+    //length = htons(length); // convert message lenght to network byte order
 
 
 
@@ -101,7 +101,7 @@ bool ServerConnection::logIn(const char *user, const char* pass) {
 
     read(server_socket, &status, sizeof(uint16_t)); // receive request status - 200 means success
 
-    status = ntohs(status); // convert to host byte order
+    //status = ntohs(status); // convert to host byte order
 
     // inform about status of request
     if(status == 200) return true;
@@ -109,7 +109,7 @@ bool ServerConnection::logIn(const char *user, const char* pass) {
 }
 
 bool ServerConnection::logOut() {
-    uint16_t action = htons(2); // request number
+    uint16_t action = 2;//htons(2); // request number
 
     // success in sending request is treated as success in logging out
     if(write(server_socket, &action, sizeof(uint16_t)) > 0) { 
