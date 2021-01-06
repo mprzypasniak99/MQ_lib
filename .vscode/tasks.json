@@ -3,11 +3,13 @@
         {
             "type": "cppbuild",
             "label": "C/C++: g++ build active file",
-            "command": "/usr/bin/g++",
+            "command": "/usr/bin/g++-8",
             "args": [
-                "--std=c++1z",
+                "--std=c++2a",
+                "-pthread",
                 "-g",
-                "${file}",
+                "${fileDirname}/*.cpp",
+                "${fileDirname}/timercpp/*.cpp",
                 "-Wall",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"

@@ -8,7 +8,7 @@ Message* MessageMonitor::getMessage(){
     return lastRead;
 }
 
-Queue::Queue(std::string owner, bool privacy, std::string name){
+Queue::Queue(const char *owner, bool privacy, const char *name){
     setOwner(owner);
     setPrivacy(privacy);
     setName(name);

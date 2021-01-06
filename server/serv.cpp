@@ -3,6 +3,8 @@ Project uses rapidjson library for parsing json files
 Github: https://github.com/Tencent/rapidjson
 */
 #include "../rapidjson/document.h"
+#include "../rapidjson/filewritestream.h"
+#include "../rapidjson/prettywriter.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -19,6 +21,7 @@ Github: https://github.com/Tencent/rapidjson
 #include "Queue.hpp"
 #include <map>
 #include <vector>
+#include <string>
 
 // Abstract class used for handling different kinds of events
 class Handler {
@@ -50,14 +53,16 @@ class Server {
         Server();
         rapidjson::Document readJsonFile(const char* filepath); // used to read and parse json config files
 
+        void writeJsonFile(rapidjson::Document *d, const char *filepath); // used to write modified Json file to file
+
         // getters for handlers to use when they need access to certain fields
         int getEpoll();
         int getSocket();
         std::unordered_set<Client*>* getClients();
 
-        std::vector<std::string> getAllQueues(); // returns all queues AVAILABLE FOR USER - TO DO
+        std::vector<std::string> getAllQueues(); // returns names of all queues AVAILABLE FOR USER - TO DO
 
-        bool createQueue(Client* owner, bool is_private, std::string name); // TO DO
+        bool createQueue(Client* owner, bool is_private, std::string name); // done
 
         bool deleteQueue(std::string name, Client* requester); // TO DO - requester must be the owner
 
@@ -65,8 +70,11 @@ class Server {
 
         bool addMessage(Client* requester, std::string content, long validityTime); // TO DO
 
-        bool authentication(int conn, std::string *name); 
+        bool authentication(std::string input, std::string *name); 
         // authentication - checks whether received username and password match data in user list
+
+        bool registerUser(std::string name); // register new user in the server 
+
         void run(); // main loop of the server
 };
 
@@ -81,8 +89,13 @@ class Client : public Handler {
         // this function handles log in request
         void logIn(uint16_t *confirm) {
             std::string name = ""; // will be used to save username after authentication
+            
+            std::string message = ""; // will store login and password received from client
 
-            if(serv->authentication(clientSocket, &name)) {
+            // Read credentials sent by client and verify if they are correct
+            readToBuffer(&message);
+            
+            if(serv->authentication(message, &name)) {
                 username = name;
                 printf("Successful login of user %s\n", username.c_str());
             
@@ -93,6 +106,40 @@ class Client : public Handler {
                 printf("Failed to log in\n");
                 *confirm = 401; // failure code
             }
+        }
+
+        void registerUser(uint16_t *confirm) {
+            std::string message = "";
+
+            readToBuffer(&message);
+
+            if(serv->registerUser(message)) {
+                printf("Successful registration with credentials %s\n", message.c_str());
+
+                *confirm = 201; // code to be sent to client, confirm success in logging in
+            }
+            else
+            {
+                printf("Failed to register %s\n", message.c_str());
+
+                *confirm = 409; // failure code   
+            }
+        }
+
+        void readToBuffer(std::string *message) {
+            uint16_t size = 0; // how many bates of data are to be read
+    
+            read(clientSocket, &size, sizeof(uint16_t)); // read size of message to be received
+
+            char *buf = new char[size]; // prepare buffer for message
+            
+            int ammountRead = 0; // how many bytes of data have already been read
+            
+            // read until whole message is read
+            while(ammountRead < size) {
+                ammountRead += read(clientSocket, buf + ammountRead, size - ammountRead);
+            }
+            *message = buf;
         }
 
     public:
@@ -116,6 +163,9 @@ class Client : public Handler {
                         serv->getClients()->erase(this);
                         delete this;
                         return;
+                        break;
+                    case 3: // REGISTER NEW USER
+                        registerUser(&confirm);
                         break;
                     default: // different - wrong request or network error
                         confirm = 404;
@@ -264,29 +314,29 @@ rapidjson::Document Server::readJsonFile(const char* filepath) {
     return d;
 }
 
+void Server::writeJsonFile(rapidjson::Document *d, const char *filepath) {
+    // open file and delete it's contents
+    FILE *fp = fopen(filepath, "w+");
+
+    // prepare rapidjson wrapper for writing json to file
+    char writeBuffer[4096];
+    rapidjson::FileWriteStream os(fp, writeBuffer, sizeof(writeBuffer));
+
+    // create Writer object, managing writing json to file
+    rapidjson::PrettyWriter<rapidjson::FileWriteStream> writer(os);
+
+    d->Accept(writer);
+
+    fclose(fp);
+}
+
 // authenticate user - read data from socket and compare with data in users list file
-bool Server::authentication(int conn, std::string *name) {
-    std::string input = ""; // string to make operation on read data easier
-
-    uint16_t size = 0; // how many bates of data are to be read
-    
-    read(conn, &size, sizeof(uint16_t)); // read size of message to be received
-
-    char buf[size]; // prepare buffer for login and password
-    
-    int ammountRead = 0; // how many bytes of data have already been read
-    
-    // read until whole message is read
-    while(ammountRead < size) {
-        ammountRead += read(conn, buf + ammountRead, size - ammountRead);
-    } 
-    
-    input = buf; // put message into string
+bool Server::authentication(std::string input, std::string *name) {
 
     int coma = input.find(","); // find coma - separator of login and password
-    int semic = input.find(";"); // find semicolon - end of message - POSSIBLY CAN BE CHANGED
+    
     std::string login = input.substr(0, coma); // separate login from string
-    std::string pass = input.substr(coma+1, semic - coma - 1); // separate password from string
+    std::string pass = input.substr(coma+1); // separate password from string
 
     rapidjson::Document d = readJsonFile("config/users.json"); // read file with users
 
@@ -303,6 +353,33 @@ bool Server::authentication(int conn, std::string *name) {
     return true;
 }
 
+bool Server::registerUser(std::string name) {
+
+    int coma = name.find(","); // find coma - separation between login and password
+    
+    std::string login = name.substr(0, coma);
+    std::string pass = name.substr(coma + 1);
+
+    rapidjson::Document d = readJsonFile("config/users.json"); // read and parse current list of users
+    
+    // check whether new user isn't already registered
+    if(d.FindMember(login.c_str()) == d.MemberEnd()) { 
+        
+        auto& allocator = d.GetAllocator();
+
+        // add user credentials to json document structure
+        d.AddMember(rapidjson::Value(login.c_str(), allocator),
+                    rapidjson::Value(pass.c_str(), allocator),
+                    allocator);
+
+        writeJsonFile(&d, "config/users.json"); // save modifications to the same file
+
+        return true; 
+    }
+    else { // if user is already registered, inform user about failure
+        return false;
+    }
+}
 
 /* ============ GETTERS ============== */
 int Server::getEpoll() {
@@ -329,9 +406,15 @@ void Server::run() {
 
 }
 
+
+// had to comment out this part during tests, because of some problems with compilation in VS
+// leaving it for now
+
 bool Server::createQueue(Client* owner, bool is_private, std::string name){
     std::string username = owner->getUsername();
-    queues.insert(std::make_pair(username, new Queue(username, is_private, name))); //well... check if queue exists, it's could be possible, but not for sure, can be done earlier
+    Queue *newQueue = new Queue(username.c_str(), is_private, name.c_str());
+    queues.insert(std::make_pair(username, newQueue)); //well... check if queue exists, it's could be possible, but not for sure, can be done earlier
+    return true;
 }
 
 

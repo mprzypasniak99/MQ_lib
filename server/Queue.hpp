@@ -12,7 +12,9 @@ class MessageMonitor {
         MessageMonitor(Message* m);
         Message* getMessage();
 
-        void nextMessage(); // No idea what it is supposed to do
+        bool nextMessage(); // Goes to the next(newer) message in the queue if it exists
+        // could be deleted and everything could be implemented in getMessage, 
+        // since we want to get it only once
 };
 
 class Queue {
@@ -30,7 +32,7 @@ class Queue {
     
     public:
 
-        Queue(std::string owner, bool privacy, std::string name);
+        Queue(const char *owner, bool privacy, const char *name);
 
         void addQueueClient(std::string client, MessageMonitor* monitor);
 

@@ -79,18 +79,16 @@ bool ServerConnection::connectToServer() {
 // send request for logging in
 bool ServerConnection::logIn(const char *user, const char* pass) {
     
-    uint16_t action = 1;//htons(1); // convert request number to network byte order
+    uint16_t action = 1; // request type
 
     // send information about kind of request you're about to make
     write(server_socket, &action, sizeof(uint16_t)); 
     
     // prepare input string
     std::string input = user;
-    input += ","; input += pass; input += ";";
+    input += ","; input += pass;
 
     uint16_t length = input.length();
-    //length = htons(length); // convert message lenght to network byte order
-
 
 
     write(server_socket, &length, sizeof(uint16_t)); // send message length
@@ -100,8 +98,6 @@ bool ServerConnection::logIn(const char *user, const char* pass) {
     uint16_t status;
 
     read(server_socket, &status, sizeof(uint16_t)); // receive request status - 200 means success
-
-    //status = ntohs(status); // convert to host byte order
 
     // inform about status of request
     if(status == 200) return true;
@@ -120,4 +116,30 @@ bool ServerConnection::logOut() {
     else {
         return false;
     }
+}
+
+bool ServerConnection::requestRegistration(const char *user, const char *pass) {
+    uint16_t action = 3; // request type
+
+    // send information about kind of request you're about to make
+    write(server_socket, &action, sizeof(uint16_t)); 
+    
+    // prepare input string
+    std::string input = user;
+    input += ","; input += pass;
+
+    uint16_t length = input.length();
+
+
+    write(server_socket, &length, sizeof(uint16_t)); // send message length
+    
+    write(server_socket, input.c_str(), input.length()); // send request message
+
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t)); // receive request status - 200 means success
+
+    // inform about status of request
+    if(status == 201) return true;
+    else return false;
 }

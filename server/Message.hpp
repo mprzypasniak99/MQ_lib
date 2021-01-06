@@ -29,7 +29,7 @@ SOFTWARE.
 #define MESSAGE_HPP
 
 #include <string>
-#include "../timercpp/timercpp.h"
+#include "timercpp/timercpp.h"
 
 class Message
 {

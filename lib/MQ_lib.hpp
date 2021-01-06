@@ -31,6 +31,8 @@ class ServerConnection {
         bool logIn(const char* user, const char* pass); // request log in
 
         bool logOut(); // request log out
+
+        bool requestRegistration(const char *user, const char *pass);
 };
 
 #endif

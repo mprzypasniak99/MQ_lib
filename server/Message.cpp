@@ -5,7 +5,7 @@ Message::Message(const char* sender, long time, const char* message, Message* la
     this->sender = sender;
     this->contents = message;
     this->timer = Timer();
-    timer.setTimeout(handleTimer(timer), time); //In seconds or not in seconds, that is the question: explaining, time is in seconds or not, because function takes miliseconds I think
+    timer.setTimeout([this](){this->handleTimer(this->timer);}, time); //In seconds or not in seconds, that is the question: explaining, time is in seconds or not, because function takes miliseconds I think
     setPrevMessage(last);
     setNextMessage(nullptr);
     last->setNextMessage(this);
