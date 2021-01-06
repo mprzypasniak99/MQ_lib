@@ -9,9 +9,10 @@ class MessageMonitor {
         Message* lastRead;
 
     public:
+        MessageMonitor(Message* m);
         Message* getMessage();
 
-        void nextMessage();
+        void nextMessage(); // No idea what it is supposed to do
 };
 
 class Queue {
@@ -26,6 +27,34 @@ class Queue {
 
         std::unordered_map<std::string, MessageMonitor*> lastReadMessages; 
         // key - user name, value - lastRead message
+    
+    public:
+
+        Queue(std::string owner, bool privacy, std::string name);
+
+        void addQueueClient(std::string client, MessageMonitor* monitor);
+
+        /* =========== SETTERS ============= */
+
+        void setName(std::string name);
+
+        void setPrivacy(bool privacy);
+
+        void setOwner(std::string owner);
+
+        void setLastMessage(Message* m);
+
+        /* =========== GETTERS ============= */
+
+        std::string getName();
+
+        bool getPrivacy();
+
+        std::string getOwner();
+
+        Message* getLastMessage();
+
+
 };
 
 

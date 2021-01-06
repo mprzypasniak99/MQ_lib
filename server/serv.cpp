@@ -127,6 +127,10 @@ class Client : public Handler {
                 
             }
         }
+        std::string getUsername(){
+            return username;
+        }
+
         /* =============== CONSTRUCTOR ================*/
         Client(int fd, Server* serv){
             // save all necesarry values to object fields
@@ -299,6 +303,7 @@ bool Server::authentication(int conn, std::string *name) {
     return true;
 }
 
+
 /* ============ GETTERS ============== */
 int Server::getEpoll() {
     return epoll_fd;
@@ -323,6 +328,13 @@ void Server::run() {
     }
 
 }
+
+bool Server::createQueue(Client* owner, bool is_private, std::string name){
+    std::string username = owner->getUsername();
+    queues.insert(std::make_pair(username, new Queue(username, is_private, name))); //well... check if queue exists, it's could be possible, but not for sure, can be done earlier
+}
+
+
 
 int main() {
     Server serv;

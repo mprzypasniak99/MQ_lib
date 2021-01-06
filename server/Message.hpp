@@ -44,7 +44,14 @@ private:
 public:
     Message(const char* sender, long time, const char* message, Message* last);
 
-    ~Message() = default;
+    ~Message() = default; //Not sure how it works, but in destructor i would handle changing
+
+    void handleTimer(Timer t);
+
+    /* =========== SETTERS ============= */
+    void setNextMessage(Message* m);
+
+    void setPrevMessage(Message* m);
 
     /* =========== GETTERS ============= */
     std::string getSender();
