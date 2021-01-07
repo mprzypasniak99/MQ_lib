@@ -32,7 +32,11 @@ class ServerConnection {
 
         bool logOut(); // request log out
 
-        bool requestRegistration(const char *user, const char *pass);
+        bool requestRegistration(const char *user, const char *pass); // register new username and password
+
+        bool deleteUser(); // delete currently logged in user
+
+        bool disconnect(); // disconnect from the server
 };
 
 #endif

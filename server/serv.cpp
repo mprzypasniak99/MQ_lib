@@ -73,7 +73,9 @@ class Server {
         bool authentication(std::string input, std::string *name); 
         // authentication - checks whether received username and password match data in user list
 
-        bool registerUser(std::string name); // register new user in the server 
+        bool registerUser(std::string name); // register new user in the server
+
+        bool deleteUser(std::string name); // delete user
 
         void run(); // main loop of the server
 };
@@ -108,6 +110,16 @@ class Client : public Handler {
             }
         }
 
+        void logOut(uint16_t *confirm) {
+            if(username.compare("") == 0) {
+                *confirm = 400;
+            }
+            else {
+                username = "";
+                *confirm = 200;
+            }
+        }
+
         void registerUser(uint16_t *confirm) {
             std::string message = "";
 
@@ -123,6 +135,16 @@ class Client : public Handler {
                 printf("Failed to register %s\n", message.c_str());
 
                 *confirm = 409; // failure code   
+            }
+        }
+
+        void deleteUser(uint16_t *confirm) {
+            if(this->username.compare("") != 0 && serv->deleteUser(username)) { // check if user is logged in
+                
+                *confirm = 200;
+            }
+            else {
+                *confirm = 401;
             }
         }
 
@@ -160,12 +182,19 @@ class Client : public Handler {
                         logIn(&confirm);
                         break;
                     case 2: // LOG OUT
-                        serv->getClients()->erase(this);
-                        delete this;
-                        return;
+                        logOut(&confirm);
                         break;
                     case 3: // REGISTER NEW USER
                         registerUser(&confirm);
+                        break;
+                    case 4: // DELETE USER
+                        deleteUser(&confirm);
+                        username = "";
+                        break;
+                    case 5: // DISCONNECT
+                        serv->getClients()->erase(this);
+                        delete this;
+                        return;
                         break;
                     default: // different - wrong request or network error
                         confirm = 404;
@@ -379,6 +408,24 @@ bool Server::registerUser(std::string name) {
     else { // if user is already registered, inform user about failure
         return false;
     }
+}
+
+bool Server::deleteUser(std::string name) {
+
+    rapidjson::Document d = readJsonFile("config/users.json"); // read file with users
+
+    // check if login is on user list
+    if(d.FindMember(name.c_str()) == d.MemberEnd()) {
+        return false;
+    }
+
+    if(!d.EraseMember(name.c_str())) {
+        return false;
+    }
+
+    writeJsonFile(&d, "config/users.json");
+
+    return true;
 }
 
 /* ============ GETTERS ============== */

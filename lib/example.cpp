@@ -21,5 +21,14 @@ int main() {
         printf("Failed to log in\n");
     }
 
+    if(sc.deleteUser()) {
+        printf("Successfuly deleted account\n");
+    }
+    else {
+        printf("Failed to delete account\n");
+    }
+
     sc.logOut();
+
+    sc.disconnect();
 }

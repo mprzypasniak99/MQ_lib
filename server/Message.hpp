@@ -30,6 +30,7 @@ SOFTWARE.
 
 #include <string>
 #include "timercpp/timercpp.h"
+#include "AbstractQueue.hpp"
 
 class Message
 {
@@ -40,11 +41,11 @@ private:
     
     std::string contents; // contents of the message
 
-    
+    AbstractQueue *queue; // queue that message is stored in
 public:
     Message(const char* sender, long time, const char* message, Message* last);
 
-    ~Message() = default; //Not sure how it works, but in destructor i would handle changing
+    ~Message(); //Not sure how it works, but in destructor i would handle changing
 
     void handleTimer(Timer t);
 

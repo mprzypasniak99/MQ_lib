@@ -11,6 +11,10 @@ Message::Message(const char* sender, long time, const char* message, Message* la
     last->setNextMessage(this);
 }
 
+Message::~Message() {
+    queue->updateMonitors(this);
+}
+
 void Message::setNextMessage(Message* m){
     this->nextMessage = m;
 }

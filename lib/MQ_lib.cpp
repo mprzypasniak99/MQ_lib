@@ -105,17 +105,17 @@ bool ServerConnection::logIn(const char *user, const char* pass) {
 }
 
 bool ServerConnection::logOut() {
-    uint16_t action = 2;//htons(2); // request number
+    uint16_t action = 2; // request number
 
     // success in sending request is treated as success in logging out
-    if(write(server_socket, &action, sizeof(uint16_t)) > 0) { 
-        shutdown(server_socket, SHUT_RDWR); // disconnect
-        close(server_socket); // close file descriptor
-        return true;
-    }
-    else {
-        return false;
-    }
+    write(server_socket, &action, sizeof(uint16_t));
+
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;    
 }
 
 bool ServerConnection::requestRegistration(const char *user, const char *pass) {
@@ -137,9 +137,35 @@ bool ServerConnection::requestRegistration(const char *user, const char *pass) {
 
     uint16_t status;
 
-    read(server_socket, &status, sizeof(uint16_t)); // receive request status - 200 means success
+    read(server_socket, &status, sizeof(uint16_t)); // receive request status - 201 means success
 
     // inform about status of request
     if(status == 201) return true;
     else return false;
+}
+
+bool ServerConnection::deleteUser() {
+    uint16_t action = 4;
+
+    write(server_socket, &action, sizeof(uint16_t));
+
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::disconnect() {
+    uint16_t action = 5;
+
+    if(write(server_socket, &action, sizeof(uint16_t)) > 0) {
+        shutdown(server_socket, SHUT_RDWR); // disconnect
+        close(server_socket); // close file descriptor
+        return true;
+    }
+    else {
+        return false;
+    }
 }

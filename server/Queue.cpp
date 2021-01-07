@@ -51,3 +51,11 @@ Message* Queue::getLastMessage(){
 void Queue::addQueueClient(std::string client, MessageMonitor* monitor){
     lastReadMessages.insert(std::make_pair(client, monitor));
 }
+
+void Queue::updateMonitors(void *delMessage) {
+    for(auto i : lastReadMessages ) {
+        if(i.second->getMessage() == (Message*)delMessage) {
+            i.second->previousMessage();
+        }
+    }
+}
