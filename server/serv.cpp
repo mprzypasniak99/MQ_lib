@@ -60,15 +60,17 @@ class Server {
         int getSocket();
         std::unordered_set<Client*>* getClients();
 
-        std::vector<std::string> getAllQueues(); // returns names of all queues AVAILABLE FOR USER - TO DO
+        std::vector<std::string> getAllQueues(Client* requester); // done
 
         bool createQueue(Client* owner, bool is_private, std::string name); // done
 
-        bool deleteQueue(std::string name, Client* requester); // TO DO - requester must be the owner
+        bool deleteQueue(std::string name, Client* requester); // done
+
+        bool joinQueue(Client* requester, std::string name);
 
         bool getAllMessages(Client* requester, std::string name); // TO DO
 
-        bool addMessage(Client* requester, std::string content, long validityTime); // TO DO
+        bool addMessage(Client* requester, std::string queue, std::string content, long validityTime); // let's say that this is done
 
         bool authentication(std::string input, std::string *name); 
         // authentication - checks whether received username and password match data in user list
@@ -456,15 +458,52 @@ void Server::run() {
 
 // had to comment out this part during tests, because of some problems with compilation in VS
 // leaving it for now
+// you should comment VS
+
+std::vector<std::string> Server::getAllQueues(Client* requester){
+    std::vector<std::string> ret;
+    for(const auto& [name, queue] : queues){    
+        if(!queue->getPrivacy() || requester->getUsername() == queue->getOwner()){ // if queue is private and requester is not owner, then he can't see the queue
+            ret.push_back(name);
+        }
+    }
+    return ret;
+}
 
 bool Server::createQueue(Client* owner, bool is_private, std::string name){
     std::string username = owner->getUsername();
-    Queue *newQueue = new Queue(username.c_str(), is_private, name.c_str());
-    queues.insert(std::make_pair(username, newQueue)); //well... check if queue exists, it's could be possible, but not for sure, can be done earlier
+    auto it = queues.find(name); // take iterator
+    if (it != queues.end()) return false; //checks if queue with given name already exists
+    Queue *newQueue = new Queue(username.c_str(), is_private, name.c_str()); // creates queue
+    queues.insert(std::make_pair(name, newQueue)); //inserts queue on list
     return true;
 }
 
+bool Server::deleteQueue(std::string name, Client* requester){
+    auto it = queues.find(name); // take iterator
+    if (it != queues.end()){
+        if(it->second->getOwner() != requester->getUsername()) return false; //check if requester is owner
+        queues.erase (it); //delete queue if exists
+        return true;
+    }
+    return false;
+}
 
+bool Server::joinQueue(Client* requester, std::string name){
+    auto it = queues.find(name);
+    if (it != queues.end()){
+            return it->second->addQueueClient(requester->getUsername());
+    }
+    return false;
+}
+bool Server::addMessage(Client* requester, std::string queue, std::string content, long validityTime){
+    auto it = queues.find(queue);
+    if (it != queues.end()){
+            it->second->addMessage(new Message(requester->getUsername().c_str(), validityTime, content.c_str()));
+            return true;
+    }
+    return false;
+}
 
 int main() {
     Server serv;

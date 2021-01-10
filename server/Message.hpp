@@ -31,8 +31,10 @@ SOFTWARE.
 #include <string>
 #include "timercpp/timercpp.h"
 #include "AbstractQueue.hpp"
+#include "AbstractMessage.hpp"
 
-class Message
+
+class Message: public AbstractMessage
 {
 private:
     std::string sender; // name of the sending user
@@ -43,11 +45,11 @@ private:
 
     AbstractQueue *queue; // queue that message is stored in
 public:
-    Message(const char* sender, long time, const char* message, Message* last);
+    Message(const char* sender, long time, const char* message);
 
-    ~Message(); //Not sure how it works, but in destructor i would handle changing
+    ~Message();
 
-    void handleTimer(Timer t);
+    void handleTimer();
 
     /* =========== SETTERS ============= */
     void setNextMessage(Message* m);
