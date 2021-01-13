@@ -1,13 +1,17 @@
 #include "MessageMonitor.hpp"
 
-bool MessageMonitor::previousMessage() {
-    
+void MessageMonitor::nextMessage() {
+    nextToRead = nextToRead->nextMessage;
 }
 
 MessageMonitor::MessageMonitor(Message* m){
-    this->lastRead = m;
+    nextToRead = m;
 }
 
 Message* MessageMonitor::getMessage(){
-    return lastRead;
+    return nextToRead;
+}
+
+void MessageMonitor::setMessage(Message *next) {
+    nextToRead = next;
 }

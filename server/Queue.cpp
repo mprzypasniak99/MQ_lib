@@ -45,23 +45,57 @@ bool Queue::addQueueClient(std::string client){
     if(tmp != nullptr){
         while(tmp->previousMessage != nullptr) tmp = tmp->previousMessage;
     }
-    if(lastReadMessages.find(client) != lastReadMessages.end())
+    if(lastReadMessages.find(client) == lastReadMessages.end()) {
         lastReadMessages.insert(std::make_pair(client, new MessageMonitor(tmp)));
         return true;
+    }
     return false;
+}
+
+bool Queue::deleteQueueClient(std::string client) {
+    if(lastReadMessages.find(client) != lastReadMessages.end()) {
+        lastReadMessages.erase(client);
+        return true;
+    }
+    else {
+        return false;
+    }
 }
 
 void Queue::updateMonitors(AbstractMessage* delMessage) {
     for(auto i : lastReadMessages ) {
         if(i.second->getMessage() == (Message*)delMessage) {
-            i.second->previousMessage();
+            i.second->nextMessage();
+        }
+    }
+}
+
+void Queue::updateMonitors() {
+    for(auto i : lastReadMessages ) {
+        if(i.second->getMessage() == nullptr) {
+            i.second->setMessage(lastMessage);
         }
     }
 }
 
 void Queue::addMessage(Message* m){
     Message* tmp = this->getLastMessage();
-    tmp->setNextMessage(m);
-    m->setPrevMessage(tmp);
+    if(tmp != nullptr) {
+        tmp->setNextMessage(m);
+        m->setPrevMessage(tmp);
+    }
     setLastMessage(m);
+
+    updateMonitors();
+}
+
+MessageMonitor* Queue::getUserMonitor(std::string name) {
+    MessageMonitor* result;
+    try {
+        result = lastReadMessages.at(name);
+    } catch(std::out_of_range&) {
+        result = nullptr;
+    }
+
+    return result;
 }

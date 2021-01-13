@@ -5,14 +5,15 @@
 
 class MessageMonitor {
     private:
-        Message* lastRead;
+        Message* nextToRead; // next message to be read by user
 
     public:
         MessageMonitor(Message* m);
         Message* getMessage();
 
-        bool previousMessage(); // Goes to the previous(older) message in the queue if it exists
+        void nextMessage(); // Goes to the next(newer) message in the queue if it exists
         
+        void setMessage(Message *next);
 };
 
 #endif

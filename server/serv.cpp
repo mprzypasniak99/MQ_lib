@@ -18,7 +18,7 @@ Github: https://github.com/Tencent/rapidjson
 #include <thread>
 #include <unordered_set>
 #include <signal.h>
-#include "Queue.hpp"
+#include "./Queue.hpp"
 #include <map>
 #include <vector>
 #include <string>
@@ -68,7 +68,13 @@ class Server {
 
         bool joinQueue(Client* requester, std::string name);
 
-        bool getAllMessages(Client* requester, std::string name); // TO DO
+        bool inviteToQueue(Client* requester, std::string qName, std::string username);
+
+        bool leaveQueue(Client* requester, std::string name);
+
+        bool getAllMessages(Client* requester, Queue *q); // send all unread messages from given queue to user
+
+        void sendMessageToAll(Queue* queue); // send unread messages to active users in given queue
 
         bool addMessage(Client* requester, std::string queue, std::string content, long validityTime); // let's say that this is done
 
@@ -103,7 +109,6 @@ class Client : public Handler {
                 username = name;
                 printf("Successful login of user %s\n", username.c_str());
             
-                
                 *confirm = 200; // code to be sent to client, confirming success in logging in
             }
             else{
@@ -150,13 +155,106 @@ class Client : public Handler {
             }
         }
 
+        void sendQueueList(uint16_t *confirm) {
+            auto list = serv->getAllQueues(this);
+            
+            std::string message = "";
+            *confirm = 400;
+            
+            if(list.size() > 0) {
+                message = list[0];
+                
+                for(unsigned int i = 1; i < list.size(); i++) {
+                    message += "," + list[i];
+                }
+
+                *confirm = 200;
+            }
+
+            uint16_t size = message.size();
+
+            write(clientSocket, &size, sizeof(uint16_t));
+            write(clientSocket, message.c_str(), size);
+        }
+
+        void joinQueue(uint16_t *confirm) {
+            std::string buf;
+
+            readToBuffer(&buf);
+            
+            if(serv->joinQueue(this, buf)) *confirm = 200;
+            else *confirm = 400;
+        }
+
+        void leaveQueue(uint16_t *confirm) {
+            std::string buf;
+
+            readToBuffer(&buf);
+            
+            if(serv->leaveQueue(this, buf)) *confirm = 200;
+            else *confirm = 400;
+        }
+
+        void createQueue(uint16_t *confirm) {
+            std::string buf;
+
+            readToBuffer(&buf);
+
+            bool isPrivate;
+
+            read(clientSocket, &isPrivate, sizeof(bool));
+            
+            if(serv->createQueue(this, isPrivate, buf)) *confirm = 200;
+            else *confirm = 400;
+        }
+
+        void deleteQueue(uint16_t *confirm) {
+            std::string buf;
+
+            readToBuffer(&buf);
+            
+            if(serv->deleteQueue(buf, this)) *confirm = 200;
+            else *confirm = 400;
+        }
+
+        void addMessage(uint16_t *confirm) {
+            std::string name;
+
+            readToBuffer(&name);
+
+            std::string content;
+
+            readToBuffer(&content);
+            
+            uint16_t validityTime;
+
+            read(clientSocket, &validityTime, sizeof(uint16_t));
+
+            if(serv->addMessage(this, name, content, validityTime)) *confirm = 200;
+            else *confirm = 400;
+        }
+
+        void inviteUser(uint16_t *confirm) {
+            std::string queue;
+
+            readToBuffer(&queue);
+
+            std::string user;
+
+            readToBuffer(&user);
+
+            if(serv->inviteToQueue(this, queue, user)) *confirm = 200;
+            else *confirm = 400;
+        }
+
         void readToBuffer(std::string *message) {
             uint16_t size = 0; // how many bates of data are to be read
     
             read(clientSocket, &size, sizeof(uint16_t)); // read size of message to be received
 
-            char *buf = new char[size]; // prepare buffer for message
-            
+            char *buf = new char[size+1]; // prepare buffer for message
+            buf[size] = '\0';
+
             int ammountRead = 0; // how many bytes of data have already been read
             
             // read until whole message is read
@@ -198,6 +296,27 @@ class Client : public Handler {
                         delete this;
                         return;
                         break;
+                    case 6: // SEND ALL QUEUES
+                        sendQueueList(&confirm);
+                        break;
+                    case 7: // JOIN QUEUE
+                        joinQueue(&confirm);
+                        break;
+                    case 8: // LEAVE QUEUE
+                        leaveQueue(&confirm);
+                        break;
+                    case 9: // CREATE QUEUE
+                        createQueue(&confirm);
+                        break;
+                    case 10: // DELETE QUEUE
+                        deleteQueue(&confirm);
+                        break;
+                    case 11: // SEND MESSAGE TO QUEUE
+                        addMessage(&confirm);
+                        break;
+                    case 12: // INVITE USER TO QUEUE
+                        inviteUser(&confirm);
+                        break;
                     default: // different - wrong request or network error
                         confirm = 404;
                         break;
@@ -210,6 +329,10 @@ class Client : public Handler {
         }
         std::string getUsername(){
             return username;
+        }
+
+        int getSocket() {
+            return clientSocket;
         }
 
         /* =============== CONSTRUCTOR ================*/
@@ -492,17 +615,86 @@ bool Server::deleteQueue(std::string name, Client* requester){
 bool Server::joinQueue(Client* requester, std::string name){
     auto it = queues.find(name);
     if (it != queues.end()){
-            return it->second->addQueueClient(requester->getUsername());
+        return it->second->addQueueClient(requester->getUsername());
     }
     return false;
 }
+
+bool Server::leaveQueue(Client* requester, std::string name) {
+    auto it = queues.find(name);
+    if (it != queues.end()) {
+        return it->second->deleteQueueClient(requester->getUsername());
+    }
+    return false;
+}
+
+bool Server::inviteToQueue(Client *requester, std::string qName, std::string username) {
+    rapidjson::Document d = readJsonFile("config/users.json");
+
+    if(d.FindMember(username.c_str()) == d.MemberEnd()) {
+        return false;
+    }
+
+    auto it = queues.find(qName);
+    if(it != queues.end()) {
+        if(it->second->getOwner().compare(requester->getUsername()) != 0) {
+            return false;
+        }
+
+        return it->second->addQueueClient(username);
+    }
+    return false;
+}
+
 bool Server::addMessage(Client* requester, std::string queue, std::string content, long validityTime){
     auto it = queues.find(queue);
     if (it != queues.end()){
-            it->second->addMessage(new Message(requester->getUsername().c_str(), validityTime, content.c_str()));
+            it->second->addMessage(new Message(requester->getUsername().c_str(), validityTime, content.c_str(), it->second));
+            
+            sendMessageToAll(queues[queue]);
             return true;
     }
     return false;
+}
+
+bool Server::getAllMessages(Client* requester, Queue *q) {
+    MessageMonitor *userMonitor = q->getUserMonitor(requester->getUsername());
+
+    if(userMonitor == nullptr) {
+        return false;
+    }
+    else {
+        Message * lastMessage = userMonitor->getMessage();
+            
+        int clientSocket = requester->getSocket();
+
+        while(lastMessage != q->getLastMessage() && lastMessage != nullptr) {
+            std::string message = q->getName() + "," + lastMessage->getSender() + "," +
+            lastMessage->getContents();
+                
+            uint16_t type = 21;
+            uint16_t size = message.size();
+                
+            write(clientSocket, &type, sizeof(uint16_t));
+            write(clientSocket, &size, sizeof(uint16_t));
+            write(clientSocket, message.c_str(), size);
+
+            userMonitor->nextMessage();
+            lastMessage = userMonitor->getMessage();
+        }
+
+        return true;
+    }
+}
+
+void Server::sendMessageToAll(Queue *queue) {
+    for(Client *client : active_users) {
+        if(client->getUsername().compare("") == 0) {
+            continue;
+        }
+
+        getAllMessages(client, queue);
+    }
 }
 
 int main() {

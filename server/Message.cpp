@@ -1,10 +1,11 @@
 #include "Message.hpp"
 
 
-Message::Message(const char* sender, long time, const char* message) {
+Message::Message(const char* sender, long time, const char* message, AbstractQueue *q) {
     this->sender = sender;
     this->contents = message;
     this->timer = Timer();
+    this->queue = q;
     setPrevMessage(nullptr);
     setNextMessage(nullptr);
     timer.setTimeout([this](){this->handleTimer();}, time); //In seconds or not in seconds, that is the question: explaining, time is in seconds or not, because function takes miliseconds I think

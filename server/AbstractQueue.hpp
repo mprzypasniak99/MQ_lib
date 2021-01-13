@@ -7,6 +7,7 @@
 class AbstractQueue {
     public:
         virtual void updateMonitors(AbstractMessage* delMessage) = 0;
+        virtual void updateMonitors() = 0;
         virtual AbstractMessage* getLastMessage() = 0;
         virtual void setLastMessage(AbstractMessage* m) = 0;
 };

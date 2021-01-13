@@ -2,31 +2,35 @@
 
 int main() {
     ServerConnection sc;
-    std::string l = "panNowy";
-    std::string p = "NicOTymNieWiem";
+    std::string l = "user";
+    std::string p = "login";
 
-    if(sc.requestRegistration(l.c_str(), p.c_str())) {
+    if(sc.requestRegistration(l, p)) {
         printf("Successfuly registered!\n");
     }
     else {
         printf("Failed to register\n");
     }
 
-    
-
-    if(sc.logIn(l.c_str(), p.c_str())) {
+    if(sc.logIn(l, p)) {
         printf("Successfuly logged in!\n");
     }
     else {
         printf("Failed to log in\n");
     }
 
-    if(sc.deleteUser()) {
-        printf("Successfuly deleted account\n");
+    if(sc.createQueue("New Queue", false)) {
+        printf("Successfuly created queue\n");
     }
     else {
-        printf("Failed to delete account\n");
+        printf("Failed to create queue\n");
     }
+
+    sc.requestQueueList();
+
+    sc.joinQueue("New Queue");
+
+    sc.addMessage("New Queue", "Test message", 60000);
 
     sc.logOut();
 

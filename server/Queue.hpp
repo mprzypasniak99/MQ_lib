@@ -22,11 +22,16 @@ class Queue : public AbstractQueue{
         
     public:
         
-        virtual void updateMonitors(AbstractMessage* delMessage);
+        virtual void updateMonitors(AbstractMessage* delMessage); // for deletion purposes
+
+        virtual void updateMonitors(); // for adding new message
         
         Queue(const char *owner, bool privacy, const char *name);
 
         bool addQueueClient(std::string client);
+
+        bool deleteQueueClient(std::string client);
+        
         void addMessage(Message*);
 
         /* =========== SETTERS ============= */
@@ -48,6 +53,8 @@ class Queue : public AbstractQueue{
         std::string getOwner();
 
         Message* getLastMessage();
+
+        MessageMonitor* getUserMonitor(std::string name);
 
 
 };

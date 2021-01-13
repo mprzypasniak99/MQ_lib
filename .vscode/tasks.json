@@ -8,14 +8,39 @@
                 "--std=c++2a",
                 "-pthread",
                 "-g",
+                "~/Desktop/SK2/server/serv.cpp",
+                "~/Desktop/SK2/server/Queue.cpp",
+                "~/Desktop/SK2/server/MessageMonitor.cpp",
+                "~/Desktop/SK2/server/Message.cpp",
+                "~/Desktop/SK2/server/timercpp/timercpp.cpp",
+                "-Wall",
+                "-o",
+                "~/Desktop/SK2/server/serv"
+            ],
+            "options": {
+                "cwd": "/usr/bin"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "Generated task by Debugger"
+        },
+        {
+            "type": "cppbuild",
+            "label": "C/C++: g++-8 build active file",
+            "command": "/usr/bin/g++-8",
+            "args": [
+                "--std=c++2a",
+                "-pthread",
+                "-g",
                 "${fileDirname}/*.cpp",
                 "${fileDirname}/timercpp/*.cpp",
-                "-Wall",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"
             ],
             "options": {
-                "cwd": "/usr/bin"
+                "cwd": "${workspaceFolder}"
             },
             "problemMatcher": [
                 "$gcc"
@@ -24,7 +49,7 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "Generated task by Debugger"
+            "detail": "compiler: /usr/bin/g++-8"
         }
     ],
     "version": "2.0.0"

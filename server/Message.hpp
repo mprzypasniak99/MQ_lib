@@ -29,7 +29,7 @@ SOFTWARE.
 #define MESSAGE_HPP
 
 #include <string>
-#include "timercpp/timercpp.h"
+#include "./timercpp/timercpp.h"
 #include "AbstractQueue.hpp"
 #include "AbstractMessage.hpp"
 
@@ -45,7 +45,7 @@ private:
 
     AbstractQueue *queue; // queue that message is stored in
 public:
-    Message(const char* sender, long time, const char* message);
+    Message(const char* sender, long time, const char* message, AbstractQueue *q);
 
     ~Message();
 

@@ -77,7 +77,7 @@ bool ServerConnection::connectToServer() {
 }
 
 // send request for logging in
-bool ServerConnection::logIn(const char *user, const char* pass) {
+bool ServerConnection::logIn(std::string user, std::string pass) {
     
     uint16_t action = 1; // request type
 
@@ -118,7 +118,7 @@ bool ServerConnection::logOut() {
     else return false;    
 }
 
-bool ServerConnection::requestRegistration(const char *user, const char *pass) {
+bool ServerConnection::requestRegistration(std::string user, std::string pass) {
     uint16_t action = 3; // request type
 
     // send information about kind of request you're about to make
@@ -168,4 +168,143 @@ bool ServerConnection::disconnect() {
     else {
         return false;
     }
+}
+
+bool ServerConnection::requestQueueList() {
+    uint16_t action = 6;
+
+    write(server_socket, &action, sizeof(uint16_t));
+
+    uint16_t size;
+    
+    read(server_socket, &size, sizeof(uint16_t));
+
+    char buf[size + 1];
+    buf[size] = '\0';
+    int ammountRead = 0;
+
+    while(ammountRead < size) {
+        ammountRead += read(server_socket, buf + ammountRead, size - ammountRead);
+    }
+    
+    printf("%s\n", buf);
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status != 200) return false;
+    
+    return true;
+}
+
+bool ServerConnection::joinQueue(std::string qName) {
+    uint16_t action = 7;
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::leaveQueue(std::string qName) {
+    uint16_t action = 8;
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::createQueue(std::string qName, bool isPrivate) {
+    uint16_t action = 9;
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+    write(server_socket, &isPrivate, sizeof(bool));
+
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::deleteQueue(std::string qName) {
+    uint16_t action = 10;
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::addMessage(std::string qName, std::string contents, uint16_t validityTime) {
+    uint16_t action = 11;
+
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+
+    size = contents.size();
+
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, contents.c_str(), size);
+
+    write(server_socket, &validityTime, sizeof(uint16_t));
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
+}
+
+bool ServerConnection::inviteUser(std::string qName, std::string username) {
+    uint16_t action = 12;
+
+    uint16_t size = qName.size();
+
+    write(server_socket, &action, sizeof(uint16_t));
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, qName.c_str(), size);
+
+    size = username.size();
+
+    write(server_socket, &size, sizeof(uint16_t));
+    write(server_socket, username.c_str(), size);
+    
+    uint16_t status;
+
+    read(server_socket, &status, sizeof(uint16_t));
+
+    if(status == 200) return true;
+    else return false;
 }
