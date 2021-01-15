@@ -12,11 +12,12 @@ ServerConnection::ServerConnection() {
         error(-1, errno, "Failed to open config file\n");
     }
     char buf[256]; // buffer for reading file
-    
+    int count = 0;
     std::string file = "";
 
     // read whole file
-    while(read(fd, buf, 256) > 0){
+    while( (count = read(fd, buf, 256)) > 0){
+        buf[count] = '\0';
         file += buf;
     }
 
@@ -50,6 +51,8 @@ ServerConnection::ServerConnection(char* ip, char* port) {
 
 // function used to set up connection to server
 bool ServerConnection::connectToServer() {
+    responseMutex.lock();
+
     addrinfo hints = {};
     // point what address and protocol you'll be using to connect
     hints.ai_family = AF_INET;
@@ -64,10 +67,10 @@ bool ServerConnection::connectToServer() {
     }
 
     // create socket with read data
-    this->server_socket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+    this->serverSocket = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 
     // try to connect and throw error if it occurs
-    if(connect(this->server_socket, result->ai_addr, result->ai_addrlen)){
+    if(connect(this->serverSocket, result->ai_addr, result->ai_addrlen)){
         error(-1, errno, "Failed to connect to %s:%s", this->ip.c_str(), this->port.c_str());
         return(false);
     }
@@ -77,12 +80,14 @@ bool ServerConnection::connectToServer() {
 }
 
 // send request for logging in
-bool ServerConnection::logIn(std::string user, std::string pass) {
+void ServerConnection::logIn(std::string user, std::string pass) {
     
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+
     uint16_t action = 1; // request type
 
     // send information about kind of request you're about to make
-    write(server_socket, &action, sizeof(uint16_t)); 
+    write(serverSocket, &action, sizeof(uint16_t)); 
     
     // prepare input string
     std::string input = user;
@@ -91,38 +96,27 @@ bool ServerConnection::logIn(std::string user, std::string pass) {
     uint16_t length = input.length();
 
 
-    write(server_socket, &length, sizeof(uint16_t)); // send message length
+    write(serverSocket, &length, sizeof(uint16_t)); // send message length
     
-    write(server_socket, input.c_str(), input.length()); // send request message
-
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t)); // receive request status - 200 means success
-
-    // inform about status of request
-    if(status == 200) return true;
-    else return false;
+    write(serverSocket, input.c_str(), input.length()); // send request message
 }
 
-bool ServerConnection::logOut() {
+void ServerConnection::logOut() {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+
     uint16_t action = 2; // request number
 
     // success in sending request is treated as success in logging out
-    write(server_socket, &action, sizeof(uint16_t));
-
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;    
+    write(serverSocket, &action, sizeof(uint16_t));    
 }
 
-bool ServerConnection::requestRegistration(std::string user, std::string pass) {
+void ServerConnection::requestRegistration(std::string user, std::string pass) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+
     uint16_t action = 3; // request type
 
     // send information about kind of request you're about to make
-    write(server_socket, &action, sizeof(uint16_t)); 
+    write(serverSocket, &action, sizeof(uint16_t)); 
     
     // prepare input string
     std::string input = user;
@@ -131,180 +125,131 @@ bool ServerConnection::requestRegistration(std::string user, std::string pass) {
     uint16_t length = input.length();
 
 
-    write(server_socket, &length, sizeof(uint16_t)); // send message length
+    write(serverSocket, &length, sizeof(uint16_t)); // send message length
     
-    write(server_socket, input.c_str(), input.length()); // send request message
-
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t)); // receive request status - 201 means success
-
-    // inform about status of request
-    if(status == 201) return true;
-    else return false;
+    write(serverSocket, input.c_str(), input.length()); // send request message
 }
 
-bool ServerConnection::deleteUser() {
+void ServerConnection::deleteUser() {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+
     uint16_t action = 4;
 
-    write(server_socket, &action, sizeof(uint16_t));
+    write(serverSocket, &action, sizeof(uint16_t));
 
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
 }
 
-bool ServerConnection::disconnect() {
+void ServerConnection::disconnect() {
+    responseMutex.lock(); // will be unlocked after sending request since there's no response to that request
+
     uint16_t action = 5;
 
-    if(write(server_socket, &action, sizeof(uint16_t)) > 0) {
-        shutdown(server_socket, SHUT_RDWR); // disconnect
-        close(server_socket); // close file descriptor
-        return true;
+    if(write(serverSocket, &action, sizeof(uint16_t)) > 0) {
+        shutdown(serverSocket, SHUT_RDWR); // disconnect
+        close(serverSocket); // close file descriptor
     }
-    else {
-        return false;
-    }
+
+    responseMutex.unlock();
 }
 
-bool ServerConnection::requestQueueList() {
+void ServerConnection::requestQueueList() {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+
     uint16_t action = 6;
 
-    write(server_socket, &action, sizeof(uint16_t));
-
-    uint16_t size;
-    
-    read(server_socket, &size, sizeof(uint16_t));
-
-    char buf[size + 1];
-    buf[size] = '\0';
-    int ammountRead = 0;
-
-    while(ammountRead < size) {
-        ammountRead += read(server_socket, buf + ammountRead, size - ammountRead);
-    }
-    
-    printf("%s\n", buf);
-    
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status != 200) return false;
-    
-    return true;
+    write(serverSocket, &action, sizeof(uint16_t));
 }
 
-bool ServerConnection::joinQueue(std::string qName) {
+void ServerConnection::joinQueue(std::string qName) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 7;
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
-    
-    uint16_t status;
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
 
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
 }
 
-bool ServerConnection::leaveQueue(std::string qName) {
+void ServerConnection::leaveQueue(std::string qName) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 8;
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
-    
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
 }
 
-bool ServerConnection::createQueue(std::string qName, bool isPrivate) {
+void ServerConnection::createQueue(std::string qName, bool isPrivate) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 9;
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
-    write(server_socket, &isPrivate, sizeof(bool));
-
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
+    write(serverSocket, &isPrivate, sizeof(bool));
 }
 
-bool ServerConnection::deleteQueue(std::string qName) {
+void ServerConnection::deleteQueue(std::string qName) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 10;
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
-    
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
 }
 
-bool ServerConnection::addMessage(std::string qName, std::string contents, uint16_t validityTime) {
+void ServerConnection::addMessage(std::string qName, std::string contents, uint16_t validityTime) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 11;
 
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
 
     size = contents.size();
 
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, contents.c_str(), size);
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, contents.c_str(), size);
 
-    write(server_socket, &validityTime, sizeof(uint16_t));
-    
-    uint16_t status;
-
-    read(server_socket, &status, sizeof(uint16_t));
-
-    if(status == 200) return true;
-    else return false;
+    write(serverSocket, &validityTime, sizeof(uint16_t));
 }
 
-bool ServerConnection::inviteUser(std::string qName, std::string username) {
+void ServerConnection::inviteUser(std::string qName, std::string username) {
+    responseMutex.lock(); // will be unlocked upon receiving response by MessageHandler object
+    
     uint16_t action = 12;
 
     uint16_t size = qName.size();
 
-    write(server_socket, &action, sizeof(uint16_t));
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, qName.c_str(), size);
+    write(serverSocket, &action, sizeof(uint16_t));
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, qName.c_str(), size);
 
     size = username.size();
 
-    write(server_socket, &size, sizeof(uint16_t));
-    write(server_socket, username.c_str(), size);
-    
-    uint16_t status;
+    write(serverSocket, &size, sizeof(uint16_t));
+    write(serverSocket, username.c_str(), size);
+}
 
-    read(server_socket, &status, sizeof(uint16_t));
+void ServerConnection::setMaxLength(uint16_t maxL) {
+    maxLength = maxL;
+}
 
-    if(status == 200) return true;
-    else return false;
+void ServerConnection::setDefaultValidity(uint16_t defT) {
+    defaultTime = defT;
+}
+
+int ServerConnection::getSocket() {
+    return serverSocket;
 }

@@ -16,10 +16,12 @@ Github: https://github.com/Tencent/rapidjson
 #include <netdb.h>
 #include "../rapidjson/document.h"
 #include <thread>
+#include "AbstractServerConnection.hpp"
 
-class ServerConnection {
-    private:
-        int server_socket; // socket used to contact with server
+
+class ServerConnection : public AbstractServerConnection {
+    protected:
+        int serverSocket; // socket used to contact with server
         std::string ip; // server IP
         std::string port; // server port
         
@@ -29,29 +31,35 @@ class ServerConnection {
         ServerConnection(); // default constructor
         ServerConnection(char* ip, char* port); // could be used to connect to server not from config file
 
-        bool logIn(std::string user, std::string pass); // request log in
+        virtual void setMaxLength(uint16_t maxL) override;
 
-        bool logOut(); // request log out
+        virtual void setDefaultValidity(uint16_t defT) override;
 
-        bool requestRegistration(std::string user, std::string pass); // register new username and password
+        virtual int getSocket();
 
-        bool deleteUser(); // delete currently logged in user
+        void logIn(std::string user, std::string pass); // request log in
 
-        bool disconnect(); // disconnect from the server
+        void logOut(); // request log out
 
-        bool requestQueueList(); // request list of available queues
+        void requestRegistration(std::string user, std::string pass); // register new username and password
 
-        bool joinQueue(std::string qName);
+        void deleteUser(); // delete currently logged in user
 
-        bool leaveQueue(std::string qName);
+        void disconnect(); // disconnect from the server
 
-        bool createQueue(std::string qName, bool isPrivate);
+        void requestQueueList(); // request list of available queues
 
-        bool deleteQueue(std::string qName);
+        void joinQueue(std::string qName);
 
-        bool addMessage(std::string qName, std::string contents, uint16_t validityTime);
+        void leaveQueue(std::string qName);
 
-        bool inviteUser(std::string qName, std::string username);
+        void createQueue(std::string qName, bool isPrivate);
+
+        void deleteQueue(std::string qName);
+
+        void addMessage(std::string qName, std::string contents, uint16_t validityTime);
+
+        void inviteUser(std::string qName, std::string username);
 };
 
 #endif

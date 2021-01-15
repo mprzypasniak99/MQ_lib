@@ -41,25 +41,40 @@ Message* Queue::getLastMessage(){
 }
 
 bool Queue::addQueueClient(std::string client){
+    qMonitor.enterWrite();
+
+    bool result;
+
     Message *tmp = getLastMessage();
     if(tmp != nullptr){
         while(tmp->previousMessage != nullptr) tmp = tmp->previousMessage;
     }
     if(lastReadMessages.find(client) == lastReadMessages.end()) {
         lastReadMessages.insert(std::make_pair(client, new MessageMonitor(tmp)));
-        return true;
+        result = true;
     }
-    return false;
+    result = false;
+
+    qMonitor.exitWrite();
+
+    return result;
 }
 
 bool Queue::deleteQueueClient(std::string client) {
+    qMonitor.enterWrite();
+
+    bool result;
     if(lastReadMessages.find(client) != lastReadMessages.end()) {
         lastReadMessages.erase(client);
-        return true;
+        result = true;
     }
     else {
-        return false;
+        result = false;
     }
+
+    qMonitor.exitWrite();
+
+    return result;
 }
 
 void Queue::updateMonitors(AbstractMessage* delMessage) {
@@ -79,6 +94,8 @@ void Queue::updateMonitors() {
 }
 
 void Queue::addMessage(Message* m){
+    qMonitor.enterWrite();
+
     Message* tmp = this->getLastMessage();
     if(tmp != nullptr) {
         tmp->setNextMessage(m);
@@ -87,15 +104,21 @@ void Queue::addMessage(Message* m){
     setLastMessage(m);
 
     updateMonitors();
+    
+    qMonitor.exitWrite();
 }
 
 MessageMonitor* Queue::getUserMonitor(std::string name) {
+    qMonitor.enterRead();
+
     MessageMonitor* result;
     try {
         result = lastReadMessages.at(name);
     } catch(std::out_of_range&) {
         result = nullptr;
     }
+
+    qMonitor.exitRead();
 
     return result;
 }

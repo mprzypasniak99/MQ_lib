@@ -22,13 +22,8 @@ Github: https://github.com/Tencent/rapidjson
 #include <map>
 #include <vector>
 #include <string>
+#include "../lib/Handler.hpp"
 
-// Abstract class used for handling different kinds of events
-class Handler {
-    public:
-        virtual void handleEvent(uint32_t events) = 0;
-        virtual ~Handler() = default;
-};
 
 // following two declarations are here just to allow declaration of Server class
 
@@ -40,8 +35,8 @@ class Server {
     private:
         std::unordered_set<Client*> active_users; // holds users that are currently connected to the server
         int in_socket; // socket on which program listens to incoming connections
-        int max_length; // max message length
-        int def_time; // default message validity time (in seconds)
+        uint16_t max_length; // max message length
+        uint16_t def_time; // default message validity time (in seconds)
         int port; // port under which server will listen to new connections
         int epoll_fd; // file descriptor for epoll
         ServerHandler* handler; // handler for new connections
@@ -58,6 +53,10 @@ class Server {
         // getters for handlers to use when they need access to certain fields
         int getEpoll();
         int getSocket();
+
+        uint16_t getMaxLength();
+        uint16_t getDefTime();
+
         std::unordered_set<Client*>* getClients();
 
         std::vector<std::string> getAllQueues(Client* requester); // done
@@ -86,6 +85,10 @@ class Server {
         bool deleteUser(std::string name); // delete user
 
         void run(); // main loop of the server
+
+        ResourceMonitor queuesMonitor; // controls read/write flow on queue map
+        ResourceMonitor usersMonitor; // controls read/write flow on Clients set
+        ResourceMonitor userDBMonitor; // controls read/write flow on users.json file
 };
 
 // Client class stores connected user's data and handles events on his socket
@@ -95,17 +98,15 @@ class Client : public Handler {
         int clientSocket; // socket through which communication with user is being done
         std::string username; // username taken from file - only if client is logged in
         Server* serv; // pointer to server, used to access data about other users and MQs
-
+        
         // this function handles log in request
-        void logIn(uint16_t *confirm) {
+        void logIn(uint16_t *confirm, std::string message) {
             std::string name = ""; // will be used to save username after authentication
             
-            std::string message = ""; // will store login and password received from client
-
-            // Read credentials sent by client and verify if they are correct
-            readToBuffer(&message);
-            
-            if(serv->authentication(message, &name)) {
+            if(username.compare("") != 0) {
+                *confirm = 400;
+            }
+            else if(serv->authentication(message, &name)) {
                 username = name;
                 printf("Successful login of user %s\n", username.c_str());
             
@@ -127,10 +128,7 @@ class Client : public Handler {
             }
         }
 
-        void registerUser(uint16_t *confirm) {
-            std::string message = "";
-
-            readToBuffer(&message);
+        void registerUser(uint16_t *confirm, std::string message) {
 
             if(serv->registerUser(message)) {
                 printf("Successful registration with credentials %s\n", message.c_str());
@@ -155,99 +153,103 @@ class Client : public Handler {
             }
         }
 
-        void sendQueueList(uint16_t *confirm) {
-            auto list = serv->getAllQueues(this);
+        std::string sendQueueList(uint16_t *confirm) {
             
             std::string message = "";
-            *confirm = 400;
             
-            if(list.size() > 0) {
-                message = list[0];
+            if(username.compare("") != 0) { // check whether user is logged in
                 
-                for(unsigned int i = 1; i < list.size(); i++) {
-                    message += "," + list[i];
+                auto list = serv->getAllQueues(this);
+                
+                if(list.size() > 0) {
+                    message = list[0];
+                    
+                    for(unsigned int i = 1; i < list.size(); i++) {
+                        message += "," + list[i];
+                    }
+
+                    *confirm = 200;
                 }
-
-                *confirm = 200;
+                else {
+                    message = "No queues found";
+                    *confirm = 400;
+                }
             }
-
-            uint16_t size = message.size();
-
-            write(clientSocket, &size, sizeof(uint16_t));
-            write(clientSocket, message.c_str(), size);
-        }
-
-        void joinQueue(uint16_t *confirm) {
-            std::string buf;
-
-            readToBuffer(&buf);
+            else {
+                *confirm = 401;
+            }
             
-            if(serv->joinQueue(this, buf)) *confirm = 200;
-            else *confirm = 400;
+            return message;
         }
 
-        void leaveQueue(uint16_t *confirm) {
-            std::string buf;
+        void joinQueue(uint16_t *confirm, std::string message) {
+            if(username.compare("") != 0) {
+                
+                if(serv->joinQueue(this, message)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401; 
+            }
+        }
 
-            readToBuffer(&buf);
+        void leaveQueue(uint16_t *confirm, std::string message) {
+            if(username.compare("") != 0) {
+                
+                if(serv->leaveQueue(this, message)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401;
+            }
+        }
+
+        void createQueue(uint16_t *confirm, std::string message, bool isPrivate) {
+            if(username.compare("") != 0) {
+                
+                if(serv->createQueue(this, isPrivate, message)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401;
+            }
+        }
+
+        void deleteQueue(uint16_t *confirm, std::string message) {
+            if(username.compare("") != 0) {
+                
+                if(serv->deleteQueue(message, this)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401;
+            }
+        }
+
+        void addMessage(uint16_t *confirm, std::string name, std::string content, uint16_t validityTime) {
+            if(username.compare("") != 0) {
+
+                if(serv->addMessage(this, name, content, validityTime)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401;
+            }
+        }
+
+        void inviteUser(uint16_t *confirm, std::string queue, std::string user) {
+            if(username.compare("") != 0) {
+
+                if(serv->inviteToQueue(this, queue, user)) *confirm = 200;
+                else *confirm = 400;
+            }
+            else {
+                *confirm = 401;
+            }
             
-            if(serv->leaveQueue(this, buf)) *confirm = 200;
-            else *confirm = 400;
         }
 
-        void createQueue(uint16_t *confirm) {
-            std::string buf;
-
-            readToBuffer(&buf);
-
-            bool isPrivate;
-
-            read(clientSocket, &isPrivate, sizeof(bool));
-            
-            if(serv->createQueue(this, isPrivate, buf)) *confirm = 200;
-            else *confirm = 400;
-        }
-
-        void deleteQueue(uint16_t *confirm) {
-            std::string buf;
-
-            readToBuffer(&buf);
-            
-            if(serv->deleteQueue(buf, this)) *confirm = 200;
-            else *confirm = 400;
-        }
-
-        void addMessage(uint16_t *confirm) {
-            std::string name;
-
-            readToBuffer(&name);
-
-            std::string content;
-
-            readToBuffer(&content);
-            
-            uint16_t validityTime;
-
-            read(clientSocket, &validityTime, sizeof(uint16_t));
-
-            if(serv->addMessage(this, name, content, validityTime)) *confirm = 200;
-            else *confirm = 400;
-        }
-
-        void inviteUser(uint16_t *confirm) {
-            std::string queue;
-
-            readToBuffer(&queue);
-
-            std::string user;
-
-            readToBuffer(&user);
-
-            if(serv->inviteToQueue(this, queue, user)) *confirm = 200;
-            else *confirm = 400;
-        }
-
-        void readToBuffer(std::string *message) {
+        std::string readToBuffer() {
             uint16_t size = 0; // how many bates of data are to be read
     
             read(clientSocket, &size, sizeof(uint16_t)); // read size of message to be received
@@ -261,7 +263,9 @@ class Client : public Handler {
             while(ammountRead < size) {
                 ammountRead += read(clientSocket, buf + ammountRead, size - ammountRead);
             }
-            *message = buf;
+            std::string message = buf;
+
+            return message;
         }
 
     public:
@@ -274,55 +278,171 @@ class Client : public Handler {
                 // check if read is really possible
                 if(read(clientSocket, &choice, sizeof(uint16_t)) > 0) {
                     
-                    uint16_t confirm; // variable for storing request status
-                    
+                    write(clientSocket, &choice, sizeof(uint16_t)); // start the response by its type
+
                     switch (choice) // execute proper methods according to received request type
                     {
-                    case 1: // LOG IN
-                        logIn(&confirm);
-                        break;
-                    case 2: // LOG OUT
-                        logOut(&confirm);
-                        break;
-                    case 3: // REGISTER NEW USER
-                        registerUser(&confirm);
-                        break;
-                    case 4: // DELETE USER
-                        deleteUser(&confirm);
-                        username = "";
-                        break;
-                    case 5: // DISCONNECT
-                        serv->getClients()->erase(this);
-                        delete this;
-                        return;
-                        break;
-                    case 6: // SEND ALL QUEUES
-                        sendQueueList(&confirm);
-                        break;
-                    case 7: // JOIN QUEUE
-                        joinQueue(&confirm);
-                        break;
-                    case 8: // LEAVE QUEUE
-                        leaveQueue(&confirm);
-                        break;
-                    case 9: // CREATE QUEUE
-                        createQueue(&confirm);
-                        break;
-                    case 10: // DELETE QUEUE
-                        deleteQueue(&confirm);
-                        break;
-                    case 11: // SEND MESSAGE TO QUEUE
-                        addMessage(&confirm);
-                        break;
-                    case 12: // INVITE USER TO QUEUE
-                        inviteUser(&confirm);
-                        break;
-                    default: // different - wrong request or network error
-                        confirm = 404;
-                        break;
-                    }
+                        case 1: // LOG IN
+                        {
+                            std::string credentials = readToBuffer();
+                            std::thread t([&, credentials](){
+                                uint16_t confirm; // variable for storing request status
+                                logIn(&confirm, credentials);
+                                write(clientSocket, &confirm, sizeof(uint16_t));});
+                            t.detach();
+                            break;
+                        }
+                        case 2: // LOG OUT
+                        {
+                            std::thread t([&](){
+                                uint16_t confirm; // variable for storing request status
+                                logOut(&confirm);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
 
-                    write(clientSocket, &confirm, sizeof(uint16_t)); // send status code to client
+                            t.detach();
+                            break;
+                        }
+                        case 3: // REGISTER NEW USER
+                        {
+                            std::string credentials = readToBuffer();
+                            std::thread t([&, credentials](){
+                                uint16_t confirm; // variable for storing request status
+                                registerUser(&confirm, credentials);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+                            t.detach();
+                            break;
+                        }
+                        case 4: // DELETE USER
+                        {
+                            std::thread t([&](){
+                                uint16_t confirm; // variable for storing request status
+                                deleteUser(&confirm);
+                                username = "";
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+                            break;
+                        }
+                        case 5: // DISCONNECT
+                        {
+                            std::thread t([&](){
+                                serv->getClients()->erase(this);
+                                delete this;
+                            });
+                            t.detach();
+
+                            break;
+                        }
+                        case 6: // SEND ALL QUEUES
+                        {
+                            std::thread t([&](){
+                                uint16_t confirm; // variable for storing request status
+                                
+                                std::string message = sendQueueList(&confirm);
+                                
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                uint16_t size = message.size();
+
+                                write(clientSocket, &size, sizeof(uint16_t));
+                                write(clientSocket, message.c_str(), size);
+                            });
+                            t.detach();
+                            
+                            break;
+                        }
+                        case 7: // JOIN QUEUE
+                        {
+                            std::string message = readToBuffer();
+
+                            std::thread t([&, message](){
+                                uint16_t confirm; // variable for storing request status
+                                joinQueue(&confirm, message);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+                            t.detach();
+                            break;
+                        }
+                        case 8: // LEAVE QUEUE
+                        {
+                            std::string message = readToBuffer();
+                            
+                            std::thread t([&, message](){
+                                uint16_t confirm; // variable for storing request status
+                                leaveQueue(&confirm, message);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+                            t.detach();
+                            break;
+                        }
+                        case 9: // CREATE QUEUE
+                        {
+                            std::string message = readToBuffer();
+                            bool isPrivate;
+                            
+                            read(clientSocket, &isPrivate, sizeof(bool));
+                            
+                            std::thread t([&, message, isPrivate](){
+                                uint16_t confirm; // variable for storing request status
+                                createQueue(&confirm, message, isPrivate);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+
+                            t.detach();
+                            break;
+                        }
+                        case 10: // DELETE QUEUE
+                        {
+                            std::string message = readToBuffer();
+
+                            std::thread t([&, message](){
+                                uint16_t confirm; // variable for storing request status
+                                deleteQueue(&confirm, message);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+                            t.detach();
+
+                            break;
+                        }
+                        case 11: // SEND MESSAGE TO QUEUE
+                        {
+                            std::string queue = readToBuffer();
+                            std::string content = readToBuffer();
+                            uint16_t time;
+
+                            read(clientSocket, &time, sizeof(uint16_t));
+
+                            std::thread t([&, queue, content, time](){
+                                uint16_t confirm; // variable for storing request status
+                                addMessage(&confirm, queue, content, time);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+
+                            t.detach();
+                            break;
+                        }
+                        case 12: // INVITE USER TO QUEUE
+                        {
+                            std::string queue = readToBuffer();
+                            std::string user = readToBuffer();
+
+                            std::thread t([&, queue, user](){
+                                uint16_t confirm; // variable for storing request status
+                                inviteUser(&confirm, queue, user);
+                                write(clientSocket, &confirm, sizeof(uint16_t));
+                            });
+
+                            t.detach();
+                            break;
+                        }
+                        default: // different - wrong request or network error
+                        {
+                            uint16_t confirm = 404;
+                            write(clientSocket, &confirm, sizeof(uint16_t));
+                            break;
+                        }
+                    }
                 }
                 
             }
@@ -369,17 +489,28 @@ class ServerHandler : public Handler {
                 socklen_t len = sizeof(clientAddr); // length of structure
                 
                 int new_conn = accept(serv->getSocket(), (sockaddr*)&clientAddr, &len);
+                
                 // accept new connection and handle possible failure    
-                    if(new_conn == -1) {
-                        error(1, errno, "accept failed");
-                    }
+                
+                if(new_conn == -1) {
+                    error(1, errno, "accept failed");
+                }
                     
-                    // log connected user's IP and port
-                    printf("New connection from %s:%d accepted\n", 
-                    inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
-                    
-                    // create new Client object and insert it to connected clients set
-                    serv->getClients()->insert(new Client(new_conn, serv));
+                // log connected user's IP and port
+                printf("New connection from %s:%d accepted\n", 
+                inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+
+                serv->usersMonitor.enterWrite();  
+                // create new Client object and insert it to connected clients set
+                serv->getClients()->insert(new Client(new_conn, serv));
+
+                serv->usersMonitor.exitWrite();
+
+                uint16_t m = serv->getMaxLength(), t = serv->getDefTime(), type = 13;
+                
+                write(new_conn, &type, sizeof(uint16_t));
+                write(new_conn, &t, sizeof(uint16_t));
+                write(new_conn, &m, sizeof(uint16_t));
             }
             if(events & ~EPOLLIN){ // other events
                 error(0, errno, "Event %x on server socket", events);
@@ -403,6 +534,14 @@ void Server::setReuseAddr(int sock)
     const int one = 1;
     int res = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     if(res) error(1,errno, "setsockopt failed");
+}
+
+uint16_t Server::getMaxLength() {
+    return max_length;
+}
+
+uint16_t Server::getDefTime() {
+    return def_time;
 }
 
 
@@ -447,6 +586,7 @@ Server::Server() {
 
 // Read and parse json file
 rapidjson::Document Server::readJsonFile(const char* filepath) {
+    
     int fd = open(filepath, O_RDONLY); // open chosen file and handle errors
     if(fd == -1) {
         error(1, errno, "Failed to read file %s", filepath);
@@ -469,6 +609,7 @@ rapidjson::Document Server::readJsonFile(const char* filepath) {
 }
 
 void Server::writeJsonFile(rapidjson::Document *d, const char *filepath) {
+    
     // open file and delete it's contents
     FILE *fp = fopen(filepath, "w+");
 
@@ -492,7 +633,11 @@ bool Server::authentication(std::string input, std::string *name) {
     std::string login = input.substr(0, coma); // separate login from string
     std::string pass = input.substr(coma+1); // separate password from string
 
+    userDBMonitor.enterRead();
+
     rapidjson::Document d = readJsonFile("config/users.json"); // read file with users
+
+    userDBMonitor.exitRead();
 
     // check if login is on user list
     if(d.FindMember(login.c_str()) == d.MemberEnd()) {
@@ -514,6 +659,10 @@ bool Server::registerUser(std::string name) {
     std::string login = name.substr(0, coma);
     std::string pass = name.substr(coma + 1);
 
+    bool result;
+
+    userDBMonitor.enterWrite();
+    
     rapidjson::Document d = readJsonFile("config/users.json"); // read and parse current list of users
     
     // check whether new user isn't already registered
@@ -528,29 +677,40 @@ bool Server::registerUser(std::string name) {
 
         writeJsonFile(&d, "config/users.json"); // save modifications to the same file
 
-        return true; 
+        result = true; 
     }
     else { // if user is already registered, inform user about failure
-        return false;
+        result = false;
     }
+
+    userDBMonitor.exitWrite();
+
+    return result;
 }
 
 bool Server::deleteUser(std::string name) {
+    bool result;
+
+    userDBMonitor.enterWrite();
 
     rapidjson::Document d = readJsonFile("config/users.json"); // read file with users
 
     // check if login is on user list
     if(d.FindMember(name.c_str()) == d.MemberEnd()) {
-        return false;
+        result = false;
+    }
+    else if(!d.EraseMember(name.c_str())) {
+        result = false;
+    }
+    else {
+        writeJsonFile(&d, "config/users.json");
+        
+        result = true;
     }
 
-    if(!d.EraseMember(name.c_str())) {
-        return false;
-    }
+    userDBMonitor.exitWrite();
 
-    writeJsonFile(&d, "config/users.json");
-
-    return true;
+    return result;
 }
 
 /* ============ GETTERS ============== */
@@ -573,7 +733,10 @@ void Server::run() {
         if(-1 == epoll_wait(epoll_fd, &ee, 1, -1)) { // wait for events
             error(0,errno,"epoll_wait failed");
         }
-        ((Handler*)ee.data.ptr)->handleEvent(ee.events); // use apropriate method to handle event
+        else {
+            ((Handler*)ee.data.ptr)->handleEvent(ee.events); // use apropriate method to handle event
+        }
+        
     }
 
 }
@@ -585,106 +748,189 @@ void Server::run() {
 
 std::vector<std::string> Server::getAllQueues(Client* requester){
     std::vector<std::string> ret;
+    
+    usersMonitor.enterRead();
+
     for(const auto& [name, queue] : queues){    
         if(!queue->getPrivacy() || requester->getUsername() == queue->getOwner()){ // if queue is private and requester is not owner, then he can't see the queue
             ret.push_back(name);
         }
     }
+
+    usersMonitor.exitRead();
+
     return ret;
 }
 
 bool Server::createQueue(Client* owner, bool is_private, std::string name){
     std::string username = owner->getUsername();
+    bool result;
+
+    queuesMonitor.enterWrite();
+
     auto it = queues.find(name); // take iterator
-    if (it != queues.end()) return false; //checks if queue with given name already exists
-    Queue *newQueue = new Queue(username.c_str(), is_private, name.c_str()); // creates queue
-    queues.insert(std::make_pair(name, newQueue)); //inserts queue on list
-    return true;
+    if (it != queues.end()) {
+        result = false; //checks if queue with given name already exists
+    } 
+    else {
+        Queue *newQueue = new Queue(username.c_str(), is_private, name.c_str()); // creates queue
+        queues.insert(std::make_pair(name, newQueue)); //inserts queue on list
+
+        result = true;
+    }
+    
+    queuesMonitor.exitWrite();
+    
+    return result;
 }
 
 bool Server::deleteQueue(std::string name, Client* requester){
+    bool result;
+    
+    queuesMonitor.enterWrite();
+
     auto it = queues.find(name); // take iterator
     if (it != queues.end()){
         if(it->second->getOwner() != requester->getUsername()) return false; //check if requester is owner
         queues.erase (it); //delete queue if exists
-        return true;
+        result = true;
     }
-    return false;
+    else {
+        result = false;
+    }
+
+    queuesMonitor.exitWrite();
+
+    return result;
 }
 
 bool Server::joinQueue(Client* requester, std::string name){
+    bool result;
+
+    queuesMonitor.enterRead();
+
     auto it = queues.find(name);
     if (it != queues.end()){
-        return it->second->addQueueClient(requester->getUsername());
+        result = it->second->addQueueClient(requester->getUsername());
     }
-    return false;
+    else {
+        result = false;
+    }
+
+    queuesMonitor.exitRead();
+
+    return result;
 }
 
 bool Server::leaveQueue(Client* requester, std::string name) {
+    bool result;
+
+    queuesMonitor.enterRead();
+    
     auto it = queues.find(name);
     if (it != queues.end()) {
-        return it->second->deleteQueueClient(requester->getUsername());
+        result = it->second->deleteQueueClient(requester->getUsername());
     }
-    return false;
+    else {
+        result = false;
+    }
+
+    queuesMonitor.exitRead();
+    
+    return result;
 }
 
 bool Server::inviteToQueue(Client *requester, std::string qName, std::string username) {
+    bool result;
+
+    userDBMonitor.enterRead();
+    
     rapidjson::Document d = readJsonFile("config/users.json");
+
+    userDBMonitor.exitRead();
 
     if(d.FindMember(username.c_str()) == d.MemberEnd()) {
         return false;
     }
 
+    queuesMonitor.enterRead();
+
     auto it = queues.find(qName);
     if(it != queues.end()) {
         if(it->second->getOwner().compare(requester->getUsername()) != 0) {
-            return false;
+            result = false;
         }
-
-        return it->second->addQueueClient(username);
+        else {
+            result = it->second->addQueueClient(username);
+        }
     }
-    return false;
+    else {
+        result = false;
+    }
+
+    queuesMonitor.exitRead();
+
+    return result;
 }
 
 bool Server::addMessage(Client* requester, std::string queue, std::string content, long validityTime){
+    bool result;
+    
+    queuesMonitor.enterRead();
+    
     auto it = queues.find(queue);
     if (it != queues.end()){
             it->second->addMessage(new Message(requester->getUsername().c_str(), validityTime, content.c_str(), it->second));
             
             sendMessageToAll(queues[queue]);
-            return true;
+            result = true;
     }
-    return false;
+    else {
+        result = false;
+    }
+    queuesMonitor.exitRead();
+
+    return result;
 }
 
 bool Server::getAllMessages(Client* requester, Queue *q) {
+    
+    q->qMonitor.enterRead();
+
     MessageMonitor *userMonitor = q->getUserMonitor(requester->getUsername());
+    bool result;
 
     if(userMonitor == nullptr) {
-        return false;
+        result = false;
     }
     else {
-        Message * lastMessage = userMonitor->getMessage();
+        Message * nextMessage = userMonitor->getMessage();
             
         int clientSocket = requester->getSocket();
 
-        while(lastMessage != q->getLastMessage() && lastMessage != nullptr) {
-            std::string message = q->getName() + "," + lastMessage->getSender() + "," +
-            lastMessage->getContents();
-                
-            uint16_t type = 21;
-            uint16_t size = message.size();
-                
-            write(clientSocket, &type, sizeof(uint16_t));
-            write(clientSocket, &size, sizeof(uint16_t));
-            write(clientSocket, message.c_str(), size);
+        while(nextMessage != nullptr) {
+            if(nextMessage->getSender() != requester->getUsername()) {
+                std::string message = q->getName() + "," + nextMessage->getSender() + "," +
+                nextMessage->getContents();
+                    
+                uint16_t type = 21;
+                uint16_t size = message.size();
+                    
+                write(clientSocket, &type, sizeof(uint16_t));
+                write(clientSocket, &size, sizeof(uint16_t));
+                write(clientSocket, message.c_str(), size);
+            }
+            
 
             userMonitor->nextMessage();
-            lastMessage = userMonitor->getMessage();
+            nextMessage = userMonitor->getMessage();
         }
 
-        return true;
+        result = true;
     }
+    q->qMonitor.exitRead();
+
+    return result;
 }
 
 void Server::sendMessageToAll(Queue *queue) {

@@ -12,10 +12,14 @@ Message::Message(const char* sender, long time, const char* message, AbstractQue
 }
 
 Message::~Message() {
+    queue->qMonitor.enterWrite(); // block modification of the queue structure
+
     queue->updateMonitors(this);
     if(this->previousMessage != nullptr) this->previousMessage->nextMessage = this->nextMessage;
     if(this->nextMessage != nullptr) this->nextMessage->previousMessage = this->previousMessage;
     if(this->queue->getLastMessage() == this) this->queue->setLastMessage(this->previousMessage);
+    
+    queue->qMonitor.exitWrite();
 }
 
 void Message::setNextMessage(Message* m){

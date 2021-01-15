@@ -19,7 +19,7 @@ class Queue : public AbstractQueue{
         std::unordered_map<std::string, MessageMonitor*> lastReadMessages; 
         // key - user name, value - lastRead message
 
-        
+
     public:
         
         virtual void updateMonitors(AbstractMessage* delMessage); // for deletion purposes
@@ -55,8 +55,6 @@ class Queue : public AbstractQueue{
         Message* getLastMessage();
 
         MessageMonitor* getUserMonitor(std::string name);
-
-
 };
 
 
