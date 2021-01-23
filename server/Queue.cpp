@@ -53,7 +53,10 @@ bool Queue::addQueueClient(std::string client){
         lastReadMessages.insert(std::make_pair(client, new MessageMonitor(tmp)));
         result = true;
     }
-    result = false;
+    else {
+        result = false;
+    }
+    
 
     qMonitor.exitWrite();
 

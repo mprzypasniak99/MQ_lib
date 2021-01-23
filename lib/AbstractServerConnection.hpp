@@ -19,6 +19,7 @@ class AbstractServerConnection {
         virtual int getSocket() = 0;
 
         std::mutex responseMutex; // mutex preventing sending new requests before receiving response
+        std::mutex writeMutex; // mutex preventing multiple threads sending data to server at the same time
 };
 
 #endif

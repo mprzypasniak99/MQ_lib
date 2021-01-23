@@ -9,6 +9,7 @@ void response(uint16_t code) {
     else {
         printf("Failure!\n");
     }
+    sleep(10);
 }
 
 void messageResponse(std::string q, std::string user, std::string message) {
@@ -27,10 +28,11 @@ void queueListResponse(uint16_t code, std::vector<std::string> list) {
     }
 }
 
-int main() {
+int main(int argc, char** argv) {
+    if(argc < 3) return -1;
     ServerConnection sc;
-    std::string l = "user";
-    std::string p = "login";
+    std::string l = argv[1];
+    std::string p = argv[2];
 
     MessageHandler handler(&sc);
 

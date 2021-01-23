@@ -86,6 +86,7 @@ void ServerConnection::logIn(std::string user, std::string pass) {
 
     uint16_t action = 1; // request type
 
+    writeMutex.lock();
     // send information about kind of request you're about to make
     write(serverSocket, &action, sizeof(uint16_t)); 
     
@@ -99,6 +100,8 @@ void ServerConnection::logIn(std::string user, std::string pass) {
     write(serverSocket, &length, sizeof(uint16_t)); // send message length
     
     write(serverSocket, input.c_str(), input.length()); // send request message
+
+    writeMutex.unlock();
 }
 
 void ServerConnection::logOut() {
@@ -107,7 +110,9 @@ void ServerConnection::logOut() {
     uint16_t action = 2; // request number
 
     // success in sending request is treated as success in logging out
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));    
+    writeMutex.unlock();
 }
 
 void ServerConnection::requestRegistration(std::string user, std::string pass) {
@@ -115,6 +120,7 @@ void ServerConnection::requestRegistration(std::string user, std::string pass) {
 
     uint16_t action = 3; // request type
 
+    writeMutex.lock();
     // send information about kind of request you're about to make
     write(serverSocket, &action, sizeof(uint16_t)); 
     
@@ -128,6 +134,7 @@ void ServerConnection::requestRegistration(std::string user, std::string pass) {
     write(serverSocket, &length, sizeof(uint16_t)); // send message length
     
     write(serverSocket, input.c_str(), input.length()); // send request message
+    writeMutex.unlock();
 }
 
 void ServerConnection::deleteUser() {
@@ -135,7 +142,9 @@ void ServerConnection::deleteUser() {
 
     uint16_t action = 4;
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
+    writeMutex.unlock();
 
 }
 
@@ -144,10 +153,12 @@ void ServerConnection::disconnect() {
 
     uint16_t action = 5;
 
+    writeMutex.lock();
     if(write(serverSocket, &action, sizeof(uint16_t)) > 0) {
         shutdown(serverSocket, SHUT_RDWR); // disconnect
         close(serverSocket); // close file descriptor
     }
+    writeMutex.unlock();
 
     responseMutex.unlock();
 }
@@ -157,7 +168,9 @@ void ServerConnection::requestQueueList() {
 
     uint16_t action = 6;
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
+    writeMutex.unlock();
 }
 
 void ServerConnection::joinQueue(std::string qName) {
@@ -166,9 +179,11 @@ void ServerConnection::joinQueue(std::string qName) {
     uint16_t action = 7;
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
+    writeMutex.unlock();
 
 }
 
@@ -178,9 +193,11 @@ void ServerConnection::leaveQueue(std::string qName) {
     uint16_t action = 8;
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
+    writeMutex.unlock();
 }
 
 void ServerConnection::createQueue(std::string qName, bool isPrivate) {
@@ -189,10 +206,12 @@ void ServerConnection::createQueue(std::string qName, bool isPrivate) {
     uint16_t action = 9;
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
     write(serverSocket, &isPrivate, sizeof(bool));
+    writeMutex.unlock();
 }
 
 void ServerConnection::deleteQueue(std::string qName) {
@@ -201,9 +220,11 @@ void ServerConnection::deleteQueue(std::string qName) {
     uint16_t action = 10;
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
+    writeMutex.unlock();
 }
 
 void ServerConnection::addMessage(std::string qName, std::string contents, uint16_t validityTime) {
@@ -213,6 +234,7 @@ void ServerConnection::addMessage(std::string qName, std::string contents, uint1
 
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
@@ -223,6 +245,7 @@ void ServerConnection::addMessage(std::string qName, std::string contents, uint1
     write(serverSocket, contents.c_str(), size);
 
     write(serverSocket, &validityTime, sizeof(uint16_t));
+    writeMutex.unlock();
 }
 
 void ServerConnection::inviteUser(std::string qName, std::string username) {
@@ -232,6 +255,7 @@ void ServerConnection::inviteUser(std::string qName, std::string username) {
 
     uint16_t size = qName.size();
 
+    writeMutex.lock();
     write(serverSocket, &action, sizeof(uint16_t));
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, qName.c_str(), size);
@@ -240,6 +264,7 @@ void ServerConnection::inviteUser(std::string qName, std::string username) {
 
     write(serverSocket, &size, sizeof(uint16_t));
     write(serverSocket, username.c_str(), size);
+    writeMutex.unlock();
 }
 
 void ServerConnection::setMaxLength(uint16_t maxL) {

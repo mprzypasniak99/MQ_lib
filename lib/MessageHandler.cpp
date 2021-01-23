@@ -165,10 +165,17 @@ void MessageHandler::handleEvent(uint32_t events) {
                 int coma1, coma2;
                 coma1 = message.find(',');
                 coma2 = message.find(',', coma1 + 1);
-
+                uint16_t len = coma1;
+                
                 receiveMessageResponse(message.substr(0, coma1), // queue name
                 message.substr(coma1 + 1, coma2 - coma1 - 1), // user name
                 message.substr(coma2 + 1)); // message contents
+
+                server->writeMutex.lock();
+                write(serverSocket, &choice, sizeof(uint16_t));
+                write(serverSocket, &len, sizeof(uint16_t));
+                write(serverSocket, message.substr(0, coma1).c_str(), coma1);
+                server->writeMutex.unlock();
             }    
         }        
     }

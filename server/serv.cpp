@@ -7,6 +7,7 @@ Github: https://github.com/Tencent/rapidjson
 #include "../rapidjson/prettywriter.h"
 #include <unistd.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -22,8 +23,18 @@ Github: https://github.com/Tencent/rapidjson
 #include <map>
 #include <vector>
 #include <string>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/types.h>
 #include "../lib/Handler.hpp"
+#include "SocketIO/SocketReader.hpp"
+#include "SocketIO/SocketWriter.hpp"
 
+// structure for IPC communication
+struct mbuf{
+    long mtype;
+    char conf;
+};
 
 // following two declarations are here just to allow declaration of Server class
 
@@ -71,7 +82,9 @@ class Server {
 
         bool leaveQueue(Client* requester, std::string name);
 
-        bool getAllMessages(Client* requester, Queue *q); // send all unread messages from given queue to user
+        bool getAllMessagesFromQueue(Client* requester, Queue *q); // send all unread messages from given queue to user
+
+        void getAllMessages(Client* requester); // get all unread messages from all user's queues
 
         void sendMessageToAll(Queue* queue); // send unread messages to active users in given queue
 
@@ -98,7 +111,10 @@ class Client : public Handler {
         int clientSocket; // socket through which communication with user is being done
         std::string username; // username taken from file - only if client is logged in
         Server* serv; // pointer to server, used to access data about other users and MQs
-        
+        int messageDeliveredQueue;
+        // IPC queue used to let thread sending messages know, that client received message
+
+
         // this function handles log in request
         void logIn(uint16_t *confirm, std::string message) {
             std::string name = ""; // will be used to save username after authentication
@@ -145,10 +161,11 @@ class Client : public Handler {
 
         void deleteUser(uint16_t *confirm) {
             if(this->username.compare("") != 0 && serv->deleteUser(username)) { // check if user is logged in
-                
+                printf("Successfuly deleted user %s\n", username.c_str());
                 *confirm = 200;
             }
             else {
+                printf("Failed to delete user\n");
                 *confirm = 401;
             }
         }
@@ -167,15 +184,17 @@ class Client : public Handler {
                     for(unsigned int i = 1; i < list.size(); i++) {
                         message += "," + list[i];
                     }
-
+                    printf("Successfuly sent queues list to %s\n", username.c_str());
                     *confirm = 200;
                 }
                 else {
+                    printf("Failed to send queue list to %s\n", username.c_str());
                     message = "No queues found";
                     *confirm = 400;
                 }
             }
             else {
+                printf("Failed to send queue list to %s\n", username.c_str());
                 *confirm = 401;
             }
             
@@ -185,8 +204,15 @@ class Client : public Handler {
         void joinQueue(uint16_t *confirm, std::string message) {
             if(username.compare("") != 0) {
                 
-                if(serv->joinQueue(this, message)) *confirm = 200;
-                else *confirm = 400;
+                if(serv->joinQueue(this, message)){
+                    *confirm = 200;
+                    printf("User %s joined queue %s\n", username.c_str(), message.c_str());
+                }
+                else{
+                    printf("User %s failed to join queue %s\n", username.c_str(), message.c_str());
+                    *confirm = 400;
+
+                } 
             }
             else {
                 *confirm = 401; 
@@ -196,7 +222,10 @@ class Client : public Handler {
         void leaveQueue(uint16_t *confirm, std::string message) {
             if(username.compare("") != 0) {
                 
-                if(serv->leaveQueue(this, message)) *confirm = 200;
+                if(serv->leaveQueue(this, message)){
+                    *confirm = 200;
+                    printf("User %s left queue %s\n", username.c_str(), message.c_str());
+                }
                 else *confirm = 400;
             }
             else {
@@ -207,8 +236,14 @@ class Client : public Handler {
         void createQueue(uint16_t *confirm, std::string message, bool isPrivate) {
             if(username.compare("") != 0) {
                 
-                if(serv->createQueue(this, isPrivate, message)) *confirm = 200;
-                else *confirm = 400;
+                if(serv->createQueue(this, isPrivate, message)){
+                    *confirm = 200;
+                    printf("Queue %s created by %s\n", message.c_str(), username.c_str());
+                } 
+                else{
+                    *confirm = 400;
+                    printf("Failed to create queue %s\n", message.c_str());
+                }
             }
             else {
                 *confirm = 401;
@@ -218,8 +253,14 @@ class Client : public Handler {
         void deleteQueue(uint16_t *confirm, std::string message) {
             if(username.compare("") != 0) {
                 
-                if(serv->deleteQueue(message, this)) *confirm = 200;
-                else *confirm = 400;
+                if(serv->deleteQueue(message, this)){
+                    *confirm = 200;
+                    printf("Queue %s deleted by %s\n", message.c_str(), username.c_str());
+                }
+                else {
+                    *confirm = 400;
+                    printf("Failed to delete queue %s\n", message.c_str());
+                }
             }
             else {
                 *confirm = 401;
@@ -229,8 +270,14 @@ class Client : public Handler {
         void addMessage(uint16_t *confirm, std::string name, std::string content, uint16_t validityTime) {
             if(username.compare("") != 0) {
 
-                if(serv->addMessage(this, name, content, validityTime)) *confirm = 200;
-                else *confirm = 400;
+                if(serv->addMessage(this, name, content, validityTime)) {
+                    *confirm = 200;
+                    printf("User %s added message to queue %s\n", username.c_str(), name.c_str());
+                }
+                else{
+                    *confirm = 400;
+                    printf("User %s failed to add message to queue %s\n", username.c_str(), name.c_str());
+                }
             }
             else {
                 *confirm = 401;
@@ -240,8 +287,16 @@ class Client : public Handler {
         void inviteUser(uint16_t *confirm, std::string queue, std::string user) {
             if(username.compare("") != 0) {
 
-                if(serv->inviteToQueue(this, queue, user)) *confirm = 200;
-                else *confirm = 400;
+                if(serv->inviteToQueue(this, queue, user)){
+                    *confirm = 200;
+                    printf("User %s invited to queue %s by %s\n", user.c_str(), queue.c_str(),
+                    username.c_str());
+                }
+                else {
+                    *confirm = 400;
+                    printf("Failed to invite user %s to queue %s by %s\n", user.c_str(), queue.c_str(),
+                    username.c_str());
+                }
             }
             else {
                 *confirm = 401;
@@ -252,23 +307,57 @@ class Client : public Handler {
         std::string readToBuffer() {
             uint16_t size = 0; // how many bates of data are to be read
     
-            read(clientSocket, &size, sizeof(uint16_t)); // read size of message to be received
-
-            char *buf = new char[size+1]; // prepare buffer for message
-            buf[size] = '\0';
-
-            int ammountRead = 0; // how many bytes of data have already been read
-            
-            // read until whole message is read
-            while(ammountRead < size) {
-                ammountRead += read(clientSocket, buf + ammountRead, size - ammountRead);
+            if(readTimeout(reader->readUint16(&size))) return "Timeout";
+            if(size > serv->getMaxLength()) {
+                timeout();
+                return "Fail";
             }
-            std::string message = buf;
+            std::string message;
+            if(readTimeout(reader->readString(&message, size))) return "Timeout";
 
             return message;
         }
 
+        bool readTimeout(int status) {
+            if(status < 1) {
+                if(status == -1) {
+                    timeout();
+                }
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+
+        bool writeTimeout(int status) {
+            if(status < 1) {
+                if(status == -1) {
+                    timeout();
+                }
+                sockWriteMutex.unlock();
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+
     public:
+        std::mutex sockWriteMutex; // for allowing only one thread to send data to client at the time
+        
+        ConnectionMonitor connMonitor;
+
+        SocketReader* reader;
+        SocketWriter* writer;
+
+        void timeout() {
+            epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr);
+            Timer* t = new Timer();
+            t->setTimeout([&, t](){t->stop(); delete this; delete t;}, 120000);
+            printf("Connection with user %s timed out\n", username.c_str());
+        }
+
         // main function used for handling events
         virtual void handleEvent(uint32_t events) override {
             if(events & EPOLLIN) { // checks whether event that occured is about possible input
@@ -276,19 +365,29 @@ class Client : public Handler {
                 uint16_t choice; // variable storing data read from socket - type of request
                 
                 // check if read is really possible
-                if(read(clientSocket, &choice, sizeof(uint16_t)) > 0) {
-                    
-                    write(clientSocket, &choice, sizeof(uint16_t)); // start the response by its type
+                if(!readTimeout(reader->readUint16(&choice))) {
+
+                    sockWriteMutex.lock();
+                    if(writeTimeout(writer->writeInt(choice))) return;
+                    sockWriteMutex.unlock();
 
                     switch (choice) // execute proper methods according to received request type
                     {
                         case 1: // LOG IN
                         {
                             std::string credentials = readToBuffer();
+                            if(credentials.compare("Timeout") == 0) return;
+                            
                             std::thread t([&, credentials](){
                                 uint16_t confirm; // variable for storing request status
                                 logIn(&confirm, credentials);
-                                write(clientSocket, &confirm, sizeof(uint16_t));});
+                                
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
+
+                                serv->getAllMessages(this);
+                            });
                             t.detach();
                             break;
                         }
@@ -297,7 +396,10 @@ class Client : public Handler {
                             std::thread t([&](){
                                 uint16_t confirm; // variable for storing request status
                                 logOut(&confirm);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
 
                             t.detach();
@@ -306,10 +408,15 @@ class Client : public Handler {
                         case 3: // REGISTER NEW USER
                         {
                             std::string credentials = readToBuffer();
+                            if(credentials.compare("Timeout") == 0) return;
+                            
                             std::thread t([&, credentials](){
                                 uint16_t confirm; // variable for storing request status
                                 registerUser(&confirm, credentials);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
                             t.detach();
                             break;
@@ -320,15 +427,18 @@ class Client : public Handler {
                                 uint16_t confirm; // variable for storing request status
                                 deleteUser(&confirm);
                                 username = "";
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
                             break;
                         }
                         case 5: // DISCONNECT
                         {
                             std::thread t([&](){
-                                serv->getClients()->erase(this);
-                                delete this;
+                                
+                                timeout();
                             });
                             t.detach();
 
@@ -340,13 +450,15 @@ class Client : public Handler {
                                 uint16_t confirm; // variable for storing request status
                                 
                                 std::string message = sendQueueList(&confirm);
-                                
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
 
                                 uint16_t size = message.size();
 
-                                write(clientSocket, &size, sizeof(uint16_t));
-                                write(clientSocket, message.c_str(), size);
+                                if(writeTimeout(writer->writeInt(size))) return;
+                                if(writeTimeout(writer->writeString(message))) return;
+                                sockWriteMutex.unlock();
                             });
                             t.detach();
                             
@@ -355,11 +467,15 @@ class Client : public Handler {
                         case 7: // JOIN QUEUE
                         {
                             std::string message = readToBuffer();
+                            if(message.compare("Timeout") == 0) return;
 
                             std::thread t([&, message](){
                                 uint16_t confirm; // variable for storing request status
                                 joinQueue(&confirm, message);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
                             t.detach();
                             break;
@@ -367,11 +483,15 @@ class Client : public Handler {
                         case 8: // LEAVE QUEUE
                         {
                             std::string message = readToBuffer();
-                            
+                            if(message.compare("Timeout") == 0) return;
+
                             std::thread t([&, message](){
                                 uint16_t confirm; // variable for storing request status
                                 leaveQueue(&confirm, message);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
                             t.detach();
                             break;
@@ -379,14 +499,19 @@ class Client : public Handler {
                         case 9: // CREATE QUEUE
                         {
                             std::string message = readToBuffer();
+                            if(message.compare("Timeout") == 0) return;
+
                             bool isPrivate;
                             
-                            read(clientSocket, &isPrivate, sizeof(bool));
+                            if(readTimeout(reader->readBool(&isPrivate))) return;
                             
                             std::thread t([&, message, isPrivate](){
                                 uint16_t confirm; // variable for storing request status
                                 createQueue(&confirm, message, isPrivate);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
 
                             t.detach();
@@ -395,11 +520,15 @@ class Client : public Handler {
                         case 10: // DELETE QUEUE
                         {
                             std::string message = readToBuffer();
+                            if(message.compare("Timeout") == 0) return;
 
                             std::thread t([&, message](){
                                 uint16_t confirm; // variable for storing request status
                                 deleteQueue(&confirm, message);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
                             t.detach();
 
@@ -408,15 +537,20 @@ class Client : public Handler {
                         case 11: // SEND MESSAGE TO QUEUE
                         {
                             std::string queue = readToBuffer();
+                            if(queue.compare("Timeout") == 0) return;
                             std::string content = readToBuffer();
+                            if(content.compare("Timeout") == 0) return;
                             uint16_t time;
 
-                            read(clientSocket, &time, sizeof(uint16_t));
+                            if(readTimeout(reader->readUint16(&time))) return;
 
                             std::thread t([&, queue, content, time](){
                                 uint16_t confirm; // variable for storing request status
                                 addMessage(&confirm, queue, content, time);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
 
                             t.detach();
@@ -425,21 +559,40 @@ class Client : public Handler {
                         case 12: // INVITE USER TO QUEUE
                         {
                             std::string queue = readToBuffer();
+                            if(queue.compare("Timeout") == 0) return;
                             std::string user = readToBuffer();
+                            if(user.compare("Timeout") == 0) return;
 
                             std::thread t([&, queue, user](){
                                 uint16_t confirm; // variable for storing request status
                                 inviteUser(&confirm, queue, user);
-                                write(clientSocket, &confirm, sizeof(uint16_t));
+
+                                sockWriteMutex.lock();
+                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                sockWriteMutex.unlock();
                             });
 
                             t.detach();
                             break;
                         }
+                        case 21: // MESSAGE CONFIRMATION
+                        {
+                            std::string queue = readToBuffer();
+                            if(queue.compare("Timeout") == 0) return;
+
+                            mbuf buf;
+                            buf.mtype = std::hash<std::string>{}(queue);
+                            buf.conf = 'y';
+
+                            msgsnd(messageDeliveredQueue, &buf, 1, 0);
+                            break;
+                        }
                         default: // different - wrong request or network error
                         {
                             uint16_t confirm = 404;
-                            write(clientSocket, &confirm, sizeof(uint16_t));
+                            sockWriteMutex.lock();
+                            if(writeTimeout(writer->writeInt(confirm))) return;
+                            sockWriteMutex.unlock();
                             break;
                         }
                     }
@@ -455,6 +608,10 @@ class Client : public Handler {
             return clientSocket;
         }
 
+        int getConfQueue() {
+            return messageDeliveredQueue;
+        }
+
         /* =============== CONSTRUCTOR ================*/
         Client(int fd, Server* serv){
             // save all necesarry values to object fields
@@ -464,13 +621,27 @@ class Client : public Handler {
 
             epoll_event ee = {EPOLLIN|EPOLLRDHUP, {.ptr = this}}; // prepare event for epoll
             epoll_ctl(serv->getEpoll(), EPOLL_CTL_ADD, fd, &ee); // add that event to epoll
+
+            reader = new SocketReader(clientSocket, &connMonitor);
+            writer = new SocketWriter(clientSocket, &connMonitor);
+
+            messageDeliveredQueue = msgget(rand(), IPC_CREAT);
         }
 
         /* ============== DESTRUCTOR ================*/
         virtual ~Client(){
-            epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr); // delete event from epoll
+            if(!connMonitor.getIsTimedOut()){
+                epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr); // delete event from epoll
+            }
             shutdown(clientSocket, SHUT_RDWR); // shut down the connection
             close(clientSocket); // close file descriptor
+
+            delete reader;
+            delete writer;
+
+            msgctl(messageDeliveredQueue, IPC_RMID, nullptr);
+
+            serv->getClients()->erase(this);
         }
 };
 
@@ -495,7 +666,8 @@ class ServerHandler : public Handler {
                 if(new_conn == -1) {
                     error(1, errno, "accept failed");
                 }
-                    
+                fcntl(new_conn, O_NONBLOCK); // make connection non blocking
+
                 // log connected user's IP and port
                 printf("New connection from %s:%d accepted\n", 
                 inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
@@ -649,6 +821,7 @@ bool Server::authentication(std::string input, std::string *name) {
         }
     }
     *name = login; // save login so it can be accessed outside this method
+    
     return true;
 }
 
@@ -893,9 +1066,22 @@ bool Server::addMessage(Client* requester, std::string queue, std::string conten
     return result;
 }
 
-bool Server::getAllMessages(Client* requester, Queue *q) {
+bool Server::getAllMessagesFromQueue(Client* requester, Queue *q) {
     
-    q->qMonitor.enterRead();
+    std::function<bool(int)> handleTimeout = [&](int status){
+        if(status < 1) {    
+            if(status == -1) requester->timeout();
+            requester->sockWriteMutex.unlock();
+            q->qMonitor.exitWrite();
+
+            return true;
+        }
+        else {
+            return false;
+        }
+    };
+
+    
 
     MessageMonitor *userMonitor = q->getUserMonitor(requester->getUsername());
     bool result;
@@ -904,9 +1090,8 @@ bool Server::getAllMessages(Client* requester, Queue *q) {
         result = false;
     }
     else {
+        q->qMonitor.enterWrite();
         Message * nextMessage = userMonitor->getMessage();
-            
-        int clientSocket = requester->getSocket();
 
         while(nextMessage != nullptr) {
             if(nextMessage->getSender() != requester->getUsername()) {
@@ -915,10 +1100,28 @@ bool Server::getAllMessages(Client* requester, Queue *q) {
                     
                 uint16_t type = 21;
                 uint16_t size = message.size();
-                    
-                write(clientSocket, &type, sizeof(uint16_t));
-                write(clientSocket, &size, sizeof(uint16_t));
-                write(clientSocket, message.c_str(), size);
+
+                requester->sockWriteMutex.lock();    
+                
+                if( handleTimeout(requester->writer->writeInt(type))) return false; 
+                if( handleTimeout(requester->writer->writeInt(size))) return false;
+                if( handleTimeout(requester->writer->writeString(message))) return false;
+
+                requester->sockWriteMutex.unlock();
+
+                mbuf confirm;
+
+                while(msgrcv(requester->getConfQueue(), &confirm, 1, 
+                std::hash<std::string>{}(q->getName()), IPC_NOWAIT) <= 0) {
+                    bool first = false;
+                    if(requester->connMonitor.timeout(first)) {
+                        if(first) {
+                            requester->timeout();
+                        }
+                        q->qMonitor.exitWrite();
+                        return false;
+                    }
+                }
             }
             
 
@@ -928,7 +1131,7 @@ bool Server::getAllMessages(Client* requester, Queue *q) {
 
         result = true;
     }
-    q->qMonitor.exitRead();
+    q->qMonitor.exitWrite();
 
     return result;
 }
@@ -938,12 +1141,23 @@ void Server::sendMessageToAll(Queue *queue) {
         if(client->getUsername().compare("") == 0) {
             continue;
         }
+        std::thread t([&, client, queue](){
+            getAllMessagesFromQueue(client, queue);
+        });
+        t.detach();
+    }
+}
 
-        getAllMessages(client, queue);
+void Server::getAllMessages(Client* requester) {
+    for(auto q : queues) {
+        if(q.second->getUserMonitor(requester->getUsername()) != nullptr) {
+            getAllMessagesFromQueue(requester, q.second);
+        }
     }
 }
 
 int main() {
+    srand(time(NULL));
     Server serv;
     serv.run();
 }
