@@ -9,9 +9,9 @@
 class SocketReader : public SocketIO
 {
 public:
-    int readUint16(uint16_t* val);
-    int readString(std::string* val, int len);
-    int readBool(bool* val);
+    bool readUint16(uint16_t* val);
+    bool readString(std::string* val, int len);
+    bool readBool(bool* val);
 
     SocketReader(int fd, ConnectionMonitor* conn);
     ~SocketReader() = default;

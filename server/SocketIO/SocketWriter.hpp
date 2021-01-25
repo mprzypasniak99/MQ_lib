@@ -9,8 +9,8 @@
 class SocketWriter : public SocketIO
 {
 public:
-    int writeInt(uint16_t val);
-    int writeString(std::string val);
+    bool writeInt(uint16_t val);
+    bool writeString(std::string val);
     SocketWriter(int fd, ConnectionMonitor* conn);
     ~SocketWriter() = default;
 };

@@ -4,56 +4,99 @@ ConnectionMonitor::ConnectionMonitor() {
     updateRead();
     updateWrite();
     isTimedOut = false;
+    currentThreads = 0;
 }
 
 void ConnectionMonitor::updateRead() {
-    std::unique_lock<std::mutex> lock(mtx);
+    mtx.lock();
     lastRead = std::chrono::system_clock::now();
+    mtx.unlock();
 }
 
 void ConnectionMonitor::updateWrite() {
-    std::unique_lock<std::mutex> lock(mtx);
+    mtx.lock();
     lastWrite = std::chrono::system_clock::now();
+    mtx.unlock();
 }
 
-void ConnectionMonitor::confirmMessage() {
-    std::unique_lock<std::mutex> lock(mtx);
-    condVar.notify_all();
-}
-
-bool ConnectionMonitor::timeout(bool& isFirst) {
-    using namespace std::chrono_literals;
+bool ConnectionMonitor::timeout() {
 
     int timeOutVal = 2000; // timeout - wait for response for 2000ms
+    mtx.lock();
     if(!isTimedOut){
-        std::unique_lock<std::mutex> lock(mtx);
-        std::chrono::time_point<std::chrono::system_clock> start = std::chrono::system_clock::now();
-        condVar.wait_for(lock, timeOutVal * 1ms);
-        // thread waits at this point either for time equal to timeOutVal or less if other thread
-        // receives response from the client
-        std::chrono::time_point<std::chrono::system_clock> stop = std::chrono::system_clock::now();
+        auto stop = std::chrono::system_clock::now();
 
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop - start);
-
-        if(duration.count() > timeOutVal) { // check if connection isn't already timed out
-            auto timeSinceWrite = std::chrono::duration_cast<std::chrono::milliseconds>(stop - lastWrite);
-            auto timeSinceRead = std::chrono::duration_cast<std::chrono::milliseconds>(stop - lastRead);
+        auto timeSinceWrite = std::chrono::duration_cast<std::chrono::milliseconds>(stop - lastWrite);
+        auto timeSinceRead = std::chrono::duration_cast<std::chrono::milliseconds>(stop - lastRead);
             
-            /*  check how much time has passed since last successful
-                read/write */
-            if( timeSinceRead.count() > 3000
-                && timeSinceWrite.count() > 3000) {
-                    isTimedOut = true;
-                    isFirst = true; 
-                    /*  the first thread which discovers that connection is timed out has to initiate
-                        shutdown of this connection */ 
-            }
+        /*  check how much time has passed since last successful
+            read/write */
+        if( timeSinceRead.count() > timeOutVal
+            && timeSinceWrite.count() > timeOutVal) {
+            isTimedOut = true;
         }
     }
+    mtx.unlock();
 
     return isTimedOut;
 }
 
 bool ConnectionMonitor::getIsTimedOut() {
-    return isTimedOut;
+    mtx.lock();
+    bool result = isTimedOut;
+    mtx.unlock();
+    
+    return result;
+}
+
+bool ConnectionMonitor::increaseNoThreads() {
+    if(!isTimedOut) {
+        mtx.lock();
+        currentThreads++;
+        mtx.unlock();
+        
+        return true;
+    }
+    else {
+        return false;
+    }
+    
+}
+
+bool ConnectionMonitor::decreaseNoThreads() {
+    mtx.lock();
+    currentThreads--;
+    mtx.unlock();
+        
+    return true;
+}
+
+int ConnectionMonitor::getNoThreads() {
+    mtx.lock();
+    int result = currentThreads;
+    mtx.unlock();
+
+    return result;
+}
+
+void ConnectionMonitor::initiateTimeout() {
+    mtx.lock();
+    isTimedOut = true;
+    mtx.unlock();
+}
+
+bool ConnectionMonitor::initiateShutdown() {
+    bool result;
+
+    mtx.lock();
+    if(isTimedOut && !shuttingDown) {
+        shuttingDown = true;
+        result = true;
+    }
+    else {
+        result = false;
+    }
+    mtx.unlock();
+
+    return result;
 }

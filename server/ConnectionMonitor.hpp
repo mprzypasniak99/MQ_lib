@@ -12,18 +12,28 @@ private:
     std::chrono::time_point<std::chrono::system_clock> lastRead;
     std::chrono::time_point<std::chrono::system_clock> lastWrite;
     bool isTimedOut;
+    int currentThreads;
+    bool shuttingDown;
 public:
     std::condition_variable condVar;
     ConnectionMonitor();
     
     void updateRead();
     void updateWrite();
-    
-    void confirmMessage();
 
-    bool timeout(bool& isFirst);
+    bool timeout();
 
     bool getIsTimedOut();
+
+    bool increaseNoThreads();
+
+    bool decreaseNoThreads();
+
+    void initiateTimeout();
+
+    int getNoThreads();
+
+    bool initiateShutdown();
 };
 
 #endif

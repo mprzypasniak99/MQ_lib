@@ -9,7 +9,6 @@ protected:
     int socket;
     ConnectionMonitor* connMonitor;
 
-    int timeout();
 public:
     SocketIO(int fd, ConnectionMonitor* conn);
     ~SocketIO() = default;

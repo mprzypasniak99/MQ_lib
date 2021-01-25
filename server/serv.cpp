@@ -30,12 +30,6 @@ Github: https://github.com/Tencent/rapidjson
 #include "SocketIO/SocketReader.hpp"
 #include "SocketIO/SocketWriter.hpp"
 
-// structure for IPC communication
-struct mbuf{
-    long mtype;
-    char conf;
-};
-
 // following two declarations are here just to allow declaration of Server class
 
 class Client; 
@@ -72,6 +66,8 @@ class Server {
 
         std::vector<std::string> getAllQueues(Client* requester); // done
 
+        Queue* getQueue(std::string name);
+
         bool createQueue(Client* owner, bool is_private, std::string name); // done
 
         bool deleteQueue(std::string name, Client* requester); // done
@@ -82,7 +78,7 @@ class Server {
 
         bool leaveQueue(Client* requester, std::string name);
 
-        bool getAllMessagesFromQueue(Client* requester, Queue *q); // send all unread messages from given queue to user
+        bool getMessageFromQueue(Client* requester, Queue *q); // send all unread messages from given queue to user
 
         void getAllMessages(Client* requester); // get all unread messages from all user's queues
 
@@ -111,9 +107,6 @@ class Client : public Handler {
         int clientSocket; // socket through which communication with user is being done
         std::string username; // username taken from file - only if client is logged in
         Server* serv; // pointer to server, used to access data about other users and MQs
-        int messageDeliveredQueue;
-        // IPC queue used to let thread sending messages know, that client received message
-
 
         // this function handles log in request
         void logIn(uint16_t *confirm, std::string message) {
@@ -305,7 +298,7 @@ class Client : public Handler {
         }
 
         std::string readToBuffer() {
-            uint16_t size = 0; // how many bates of data are to be read
+            uint16_t size = 0; // how many bytes of data are to be read
     
             if(readTimeout(reader->readUint16(&size))) return "Timeout";
             if(size > serv->getMaxLength()) {
@@ -318,11 +311,10 @@ class Client : public Handler {
             return message;
         }
 
-        bool readTimeout(int status) {
-            if(status < 1) {
-                if(status == -1) {
-                    timeout();
-                }
+        bool readTimeout(bool status) {
+            if(!status) {
+                connMonitor.decreaseNoThreads();
+                timeout();
                 return true;
             }
             else {
@@ -330,11 +322,10 @@ class Client : public Handler {
             }
         }
 
-        bool writeTimeout(int status) {
-            if(status < 1) {
-                if(status == -1) {
-                    timeout();
-                }
+        bool writeTimeout(bool status) {
+            if(!status) {
+                connMonitor.decreaseNoThreads();
+                timeout();
                 sockWriteMutex.unlock();
                 return true;
             }
@@ -352,10 +343,16 @@ class Client : public Handler {
         SocketWriter* writer;
 
         void timeout() {
-            epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr);
-            Timer* t = new Timer();
-            t->setTimeout([&, t](){t->stop(); delete this; delete t;}, 120000);
-            printf("Connection with user %s timed out\n", username.c_str());
+            
+            if(connMonitor.getNoThreads() == 0 && connMonitor.initiateShutdown()) {
+                    
+                    std::thread t([&]() {
+                        using namespace std::chrono_literals;
+                        std::this_thread::sleep_for(5s);
+                        delete this;
+                    });
+                    t.detach();
+                }
         }
 
         // main function used for handling events
@@ -364,8 +361,10 @@ class Client : public Handler {
                 
                 uint16_t choice; // variable storing data read from socket - type of request
                 
+                 // inform monitor that new thread operates on the connection
+                
                 // check if read is really possible
-                if(!readTimeout(reader->readUint16(&choice))) {
+                if(connMonitor.increaseNoThreads() && !readTimeout(reader->readUint16(&choice))) {
 
                     sockWriteMutex.lock();
                     if(writeTimeout(writer->writeInt(choice))) return;
@@ -376,17 +375,23 @@ class Client : public Handler {
                         case 1: // LOG IN
                         {
                             std::string credentials = readToBuffer();
-                            if(credentials.compare("Timeout") == 0) return;
+                            if(credentials.compare("Timeout") == 0 ||
+                            credentials.compare("Fail") == 0) return;
                             
                             std::thread t([&, credentials](){
-                                uint16_t confirm; // variable for storing request status
-                                logIn(&confirm, credentials);
-                                
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                if(connMonitor.increaseNoThreads()) {
 
-                                serv->getAllMessages(this);
+                                    uint16_t confirm; // variable for storing request status
+                                    logIn(&confirm, credentials);
+                                    
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    serv->getAllMessages(this);
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
                             break;
@@ -394,12 +399,17 @@ class Client : public Handler {
                         case 2: // LOG OUT
                         {
                             std::thread t([&](){
-                                uint16_t confirm; // variable for storing request status
-                                logOut(&confirm);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    logOut(&confirm);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
 
                             t.detach();
@@ -408,15 +418,21 @@ class Client : public Handler {
                         case 3: // REGISTER NEW USER
                         {
                             std::string credentials = readToBuffer();
-                            if(credentials.compare("Timeout") == 0) return;
+                            if(credentials.compare("Timeout") == 0 ||
+                            credentials.compare("Fail") == 0) return;
                             
                             std::thread t([&, credentials](){
-                                uint16_t confirm; // variable for storing request status
-                                registerUser(&confirm, credentials);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    registerUser(&confirm, credentials);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
                             break;
@@ -424,41 +440,49 @@ class Client : public Handler {
                         case 4: // DELETE USER
                         {
                             std::thread t([&](){
-                                uint16_t confirm; // variable for storing request status
-                                deleteUser(&confirm);
-                                username = "";
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    deleteUser(&confirm);
+                                    username = "";
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             break;
                         }
                         case 5: // DISCONNECT
                         {
-                            std::thread t([&](){
-                                
-                                timeout();
-                            });
-                            t.detach();
-
+                            connMonitor.decreaseNoThreads();
+                            connMonitor.initiateTimeout();
+                            timeout();
+                            return;
                             break;
                         }
                         case 6: // SEND ALL QUEUES
                         {
                             std::thread t([&](){
-                                uint16_t confirm; // variable for storing request status
+                                if(connMonitor.increaseNoThreads()) {
                                 
-                                std::string message = sendQueueList(&confirm);
+                                    uint16_t confirm; // variable for storing request status
+                                    
+                                    std::string message = sendQueueList(&confirm);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
 
-                                uint16_t size = message.size();
+                                    uint16_t size = message.size();
 
-                                if(writeTimeout(writer->writeInt(size))) return;
-                                if(writeTimeout(writer->writeString(message))) return;
-                                sockWriteMutex.unlock();
+                                    if(writeTimeout(writer->writeInt(size))) return;
+                                    if(writeTimeout(writer->writeString(message))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
                             
@@ -467,15 +491,21 @@ class Client : public Handler {
                         case 7: // JOIN QUEUE
                         {
                             std::string message = readToBuffer();
-                            if(message.compare("Timeout") == 0) return;
+                            if(message.compare("Timeout") == 0 ||
+                            message.compare("Fail") == 0) return;
 
                             std::thread t([&, message](){
-                                uint16_t confirm; // variable for storing request status
-                                joinQueue(&confirm, message);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    joinQueue(&confirm, message);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
                             break;
@@ -483,15 +513,21 @@ class Client : public Handler {
                         case 8: // LEAVE QUEUE
                         {
                             std::string message = readToBuffer();
-                            if(message.compare("Timeout") == 0) return;
+                            if(message.compare("Timeout") == 0 ||
+                            message.compare("Fail") == 0) return;
 
                             std::thread t([&, message](){
-                                uint16_t confirm; // variable for storing request status
-                                leaveQueue(&confirm, message);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    leaveQueue(&confirm, message);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
                             break;
@@ -499,19 +535,25 @@ class Client : public Handler {
                         case 9: // CREATE QUEUE
                         {
                             std::string message = readToBuffer();
-                            if(message.compare("Timeout") == 0) return;
+                            if(message.compare("Timeout") == 0 ||
+                            message.compare("Fail") == 0) return;
 
                             bool isPrivate;
                             
                             if(readTimeout(reader->readBool(&isPrivate))) return;
                             
                             std::thread t([&, message, isPrivate](){
-                                uint16_t confirm; // variable for storing request status
-                                createQueue(&confirm, message, isPrivate);
+                                if(connMonitor.increaseNoThreads()){    
+                                    
+                                    uint16_t confirm; // variable for storing request status
+                                    createQueue(&confirm, message, isPrivate);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
 
                             t.detach();
@@ -520,15 +562,21 @@ class Client : public Handler {
                         case 10: // DELETE QUEUE
                         {
                             std::string message = readToBuffer();
-                            if(message.compare("Timeout") == 0) return;
+                            if(message.compare("Timeout") == 0 ||
+                            message.compare("Fail") == 0) return;
 
                             std::thread t([&, message](){
-                                uint16_t confirm; // variable for storing request status
-                                deleteQueue(&confirm, message);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    deleteQueue(&confirm, message);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
                             t.detach();
 
@@ -537,20 +585,29 @@ class Client : public Handler {
                         case 11: // SEND MESSAGE TO QUEUE
                         {
                             std::string queue = readToBuffer();
-                            if(queue.compare("Timeout") == 0) return;
+                            if(queue.compare("Timeout") == 0 ||
+                            queue.compare("Fail") == 0) return;
+                            
                             std::string content = readToBuffer();
-                            if(content.compare("Timeout") == 0) return;
+                            if(content.compare("Timeout") == 0 ||
+                            content.compare("Fail") == 0) return;
+                            
                             uint16_t time;
 
                             if(readTimeout(reader->readUint16(&time))) return;
 
                             std::thread t([&, queue, content, time](){
-                                uint16_t confirm; // variable for storing request status
-                                addMessage(&confirm, queue, content, time);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    addMessage(&confirm, queue, content, time);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
 
                             t.detach();
@@ -559,17 +616,25 @@ class Client : public Handler {
                         case 12: // INVITE USER TO QUEUE
                         {
                             std::string queue = readToBuffer();
-                            if(queue.compare("Timeout") == 0) return;
+                            if(queue.compare("Timeout") == 0 ||
+                            queue.compare("Fail") == 0) return;
+                            
                             std::string user = readToBuffer();
-                            if(user.compare("Timeout") == 0) return;
+                            if(user.compare("Timeout") == 0 ||
+                            user.compare("Fail") == 0) return;
 
                             std::thread t([&, queue, user](){
-                                uint16_t confirm; // variable for storing request status
-                                inviteUser(&confirm, queue, user);
+                                if(connMonitor.increaseNoThreads()) {
+                                
+                                    uint16_t confirm; // variable for storing request status
+                                    inviteUser(&confirm, queue, user);
 
-                                sockWriteMutex.lock();
-                                if(writeTimeout(writer->writeInt(confirm))) return;
-                                sockWriteMutex.unlock();
+                                    sockWriteMutex.lock();
+                                    if(writeTimeout(writer->writeInt(confirm))) return;
+                                    sockWriteMutex.unlock();
+
+                                    connMonitor.decreaseNoThreads();
+                                }
                             });
 
                             t.detach();
@@ -578,13 +643,23 @@ class Client : public Handler {
                         case 21: // MESSAGE CONFIRMATION
                         {
                             std::string queue = readToBuffer();
-                            if(queue.compare("Timeout") == 0) return;
+                            if(queue.compare("Timeout") == 0 ||
+                            queue.compare("Fail") == 0) return;
 
-                            mbuf buf;
-                            buf.mtype = std::hash<std::string>{}(queue);
-                            buf.conf = 'y';
+                            Queue* q = serv->getQueue(queue);
+                            if(q != nullptr) {
+                                MessageMonitor* monitor = q->getUserMonitor(username);
+                                monitor->nextMessage();
 
-                            msgsnd(messageDeliveredQueue, &buf, 1, 0);
+                                std::thread t([&, q]() {
+                                    connMonitor.increaseNoThreads();
+                                    if(serv->getMessageFromQueue(this, q)) {
+                                        connMonitor.decreaseNoThreads();
+                                    }
+                                });
+                                t.detach();
+                            } 
+                            
                             break;
                         }
                         default: // different - wrong request or network error
@@ -596,7 +671,12 @@ class Client : public Handler {
                             break;
                         }
                     }
+                    connMonitor.decreaseNoThreads(); // thread ends its operations on the connection
                 }
+                else {
+                    timeout();
+                }
+                
                 
             }
         }
@@ -606,10 +686,6 @@ class Client : public Handler {
 
         int getSocket() {
             return clientSocket;
-        }
-
-        int getConfQueue() {
-            return messageDeliveredQueue;
         }
 
         /* =============== CONSTRUCTOR ================*/
@@ -624,22 +700,17 @@ class Client : public Handler {
 
             reader = new SocketReader(clientSocket, &connMonitor);
             writer = new SocketWriter(clientSocket, &connMonitor);
-
-            messageDeliveredQueue = msgget(rand(), IPC_CREAT);
         }
 
         /* ============== DESTRUCTOR ================*/
         virtual ~Client(){
-            if(!connMonitor.getIsTimedOut()){
-                epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr); // delete event from epoll
-            }
+            
+            epoll_ctl(serv->getEpoll(), EPOLL_CTL_DEL, clientSocket, nullptr); // delete event from epoll
             shutdown(clientSocket, SHUT_RDWR); // shut down the connection
             close(clientSocket); // close file descriptor
 
             delete reader;
             delete writer;
-
-            msgctl(messageDeliveredQueue, IPC_RMID, nullptr);
 
             serv->getClients()->erase(this);
         }
@@ -666,7 +737,8 @@ class ServerHandler : public Handler {
                 if(new_conn == -1) {
                     error(1, errno, "accept failed");
                 }
-                fcntl(new_conn, O_NONBLOCK); // make connection non blocking
+                int flags = fcntl(new_conn, F_GETFL);
+                fcntl(new_conn, F_SETFL, flags|O_NONBLOCK); // make connection non blocking
 
                 // log connected user's IP and port
                 printf("New connection from %s:%d accepted\n", 
@@ -714,6 +786,22 @@ uint16_t Server::getMaxLength() {
 
 uint16_t Server::getDefTime() {
     return def_time;
+}
+
+Queue* Server::getQueue(std::string name) {
+    Queue* result;
+
+    queuesMonitor.enterRead();
+    try {
+        result = queues.at(name);
+    }
+    catch (std::out_of_range&) {
+        result = nullptr;
+    }
+    queuesMonitor.exitRead();
+
+
+    return result;
 }
 
 
@@ -915,10 +1003,6 @@ void Server::run() {
 }
 
 
-// had to comment out this part during tests, because of some problems with compilation in VS
-// leaving it for now
-// you should comment VS
-
 std::vector<std::string> Server::getAllQueues(Client* requester){
     std::vector<std::string> ret;
     
@@ -1066,13 +1150,14 @@ bool Server::addMessage(Client* requester, std::string queue, std::string conten
     return result;
 }
 
-bool Server::getAllMessagesFromQueue(Client* requester, Queue *q) {
+bool Server::getMessageFromQueue(Client* requester, Queue *q) {
     
     std::function<bool(int)> handleTimeout = [&](int status){
-        if(status < 1) {    
-            if(status == -1) requester->timeout();
+        if(!status) {    
+            requester->connMonitor.decreaseNoThreads();
+            requester->timeout();
             requester->sockWriteMutex.unlock();
-            q->qMonitor.exitWrite();
+            q->qMonitor.exitRead();
 
             return true;
         }
@@ -1090,48 +1175,29 @@ bool Server::getAllMessagesFromQueue(Client* requester, Queue *q) {
         result = false;
     }
     else {
-        q->qMonitor.enterWrite();
-        Message * nextMessage = userMonitor->getMessage();
+        q->qMonitor.enterRead();
+        Message* nextMessage = userMonitor->getMessage();
 
-        while(nextMessage != nullptr) {
-            if(nextMessage->getSender() != requester->getUsername()) {
-                std::string message = q->getName() + "," + nextMessage->getSender() + "," +
-                nextMessage->getContents();
+        
+        if(nextMessage != nullptr && nextMessage->getSender() != requester->getUsername()) {
+            std::string message = q->getName() + "," + nextMessage->getSender() + "," +
+            nextMessage->getContents();
                     
-                uint16_t type = 21;
-                uint16_t size = message.size();
+            uint16_t type = 21;
+            uint16_t size = message.size();
 
-                requester->sockWriteMutex.lock();    
+            requester->sockWriteMutex.lock();    
                 
-                if( handleTimeout(requester->writer->writeInt(type))) return false; 
-                if( handleTimeout(requester->writer->writeInt(size))) return false;
-                if( handleTimeout(requester->writer->writeString(message))) return false;
+            if( handleTimeout(requester->writer->writeInt(type))) return false; 
+            if( handleTimeout(requester->writer->writeInt(size))) return false;
+            if( handleTimeout(requester->writer->writeString(message))) return false;
 
-                requester->sockWriteMutex.unlock();
-
-                mbuf confirm;
-
-                while(msgrcv(requester->getConfQueue(), &confirm, 1, 
-                std::hash<std::string>{}(q->getName()), IPC_NOWAIT) <= 0) {
-                    bool first = false;
-                    if(requester->connMonitor.timeout(first)) {
-                        if(first) {
-                            requester->timeout();
-                        }
-                        q->qMonitor.exitWrite();
-                        return false;
-                    }
-                }
-            }
-            
-
-            userMonitor->nextMessage();
-            nextMessage = userMonitor->getMessage();
+            requester->sockWriteMutex.unlock();
         }
 
         result = true;
     }
-    q->qMonitor.exitWrite();
+    q->qMonitor.exitRead();
 
     return result;
 }
@@ -1141,17 +1207,14 @@ void Server::sendMessageToAll(Queue *queue) {
         if(client->getUsername().compare("") == 0) {
             continue;
         }
-        std::thread t([&, client, queue](){
-            getAllMessagesFromQueue(client, queue);
-        });
-        t.detach();
+        getMessageFromQueue(client, queue);
     }
 }
 
 void Server::getAllMessages(Client* requester) {
     for(auto q : queues) {
         if(q.second->getUserMonitor(requester->getUsername()) != nullptr) {
-            getAllMessagesFromQueue(requester, q.second);
+            getMessageFromQueue(requester, q.second);
         }
     }
 }
