@@ -36,6 +36,7 @@
                 "-g",
                 "${fileDirname}/*.cpp",
                 "${fileDirname}/timercpp/*.cpp",
+                "${fileDirname}/SocketIO/*.cpp",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}"
             ],
