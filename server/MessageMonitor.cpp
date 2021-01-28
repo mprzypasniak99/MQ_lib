@@ -1,7 +1,9 @@
 #include "MessageMonitor.hpp"
 
 void MessageMonitor::nextMessage() {
-    nextToRead = nextToRead->nextMessage;
+    if(nextToRead != nullptr) {
+        nextToRead = nextToRead->nextMessage;
+    }
 }
 
 MessageMonitor::MessageMonitor(Message* m){

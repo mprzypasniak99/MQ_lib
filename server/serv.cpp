@@ -490,6 +490,7 @@ class Client : public Handler {
                                     connMonitor.decreaseNoThreads();
                                 }
                             });
+                            t.detach();
                             break;
                         }
                         case 5: // DISCONNECT
