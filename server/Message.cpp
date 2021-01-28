@@ -1,7 +1,7 @@
 #include "Message.hpp"
 
 
-Message::Message(const char* sender, long time, const char* message, AbstractQueue *q) {
+Message::Message(std::string sender, long time, std::string message, AbstractQueue *q) {
     this->sender = sender;
     this->contents = message;
     this->timer = Timer();

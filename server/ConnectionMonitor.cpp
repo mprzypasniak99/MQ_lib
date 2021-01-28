@@ -21,7 +21,7 @@ void ConnectionMonitor::updateWrite() {
 
 bool ConnectionMonitor::timeout() {
 
-    int timeOutVal = 2000; // timeout - wait for response for 2000ms
+    int timeOutVal = 6000; // timeout - wait for response for one minute
     mtx.lock();
     if(!isTimedOut){
         auto stop = std::chrono::system_clock::now();

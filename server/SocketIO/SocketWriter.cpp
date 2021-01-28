@@ -3,10 +3,14 @@
 SocketWriter::SocketWriter(int fd, ConnectionMonitor* conn) : SocketIO(fd, conn) {}
 
 bool SocketWriter::writeInt(uint16_t val) {
-
-    while (write(socket, &val, sizeof(val)) <= 0) {
-        if(connMonitor->timeout()) {
-            return false;
+    if(connMonitor->getIsTimedOut()) {
+        return false;
+    }
+    else {
+        while (write(socket, &val, sizeof(val)) <= 0) {
+            if(connMonitor->timeout()) {
+                return false;
+            }
         }
     }
     
@@ -15,21 +19,27 @@ bool SocketWriter::writeInt(uint16_t val) {
 }
 
 bool SocketWriter::writeString(std::string val) {
-    int alreadyWriten = 0, thisTime = 0;
-    int len = val.length();
+    if(connMonitor->getIsTimedOut()) {
+        return false;
+    }
+    else
+    {
+        int alreadyWriten = 0, thisTime = 0;
+        int len = val.length();
 
-    while(alreadyWriten < len) {
-        thisTime = write(socket, val.c_str() + alreadyWriten, len - alreadyWriten);
-        if(thisTime <= 0) {
-            if(connMonitor->timeout()) {
-                return false;
+        while(alreadyWriten < len) {
+            thisTime = write(socket, val.c_str() + alreadyWriten, len - alreadyWriten);
+            if(thisTime <= 0) {
+                if(connMonitor->timeout()) {
+                    return false;
+                }
+            }
+            else {
+                alreadyWriten += thisTime;
             }
         }
-        else {
-            alreadyWriten += thisTime;
-        }
     }
-
+    
     connMonitor->updateWrite();
     return true;
 }

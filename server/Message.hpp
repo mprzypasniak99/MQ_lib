@@ -45,7 +45,7 @@ private:
 
     AbstractQueue *queue; // queue that message is stored in
 public:
-    Message(const char* sender, long time, const char* message, AbstractQueue *q);
+    Message(std::string sender, long time, std::string message, AbstractQueue *q);
 
     ~Message();
 

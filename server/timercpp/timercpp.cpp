@@ -4,8 +4,10 @@
 void Timer::setTimeout(std::function<void()> function, int delay) {
     this->clear = false;
     std::thread t([=]() {
+        using namespace std::chrono_literals;
+
         if(this->clear) return;
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        std::this_thread::sleep_for(delay * 1s);
         if(this->clear) return;
         function();
     });
